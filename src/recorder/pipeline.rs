@@ -346,7 +346,7 @@ struct AudioPreprocTail {
 
 fn build_audio_preproc(prefix: &str, device: &str) -> Result<(gst::Element, AudioPreprocTail)> {
     let src = gst::ElementFactory::make("pulsesrc")
-        .name(&format!("{prefix}_src"))
+        .name(format!("{prefix}_src"))
         .property("device", device)
         .property("provide-clock", false)
         .property("do-timestamp", true)
@@ -355,19 +355,19 @@ fn build_audio_preproc(prefix: &str, device: &str) -> Result<(gst::Element, Audi
     src.set_property_from_str("slave-method", "skew");
 
     let convert = gst::ElementFactory::make("audioconvert")
-        .name(&format!("{prefix}_aconv"))
+        .name(format!("{prefix}_aconv"))
         .build()
         .context("audioconvert missing")?;
     let resample = gst::ElementFactory::make("audioresample")
-        .name(&format!("{prefix}_ares"))
+        .name(format!("{prefix}_ares"))
         .build()
         .context("audioresample missing")?;
     let rate = gst::ElementFactory::make("audiorate")
-        .name(&format!("{prefix}_arate"))
+        .name(format!("{prefix}_arate"))
         .build()
         .context("audiorate missing")?;
     let capsf = gst::ElementFactory::make("capsfilter")
-        .name(&format!("{prefix}_capsf"))
+        .name(format!("{prefix}_capsf"))
         .property("caps", audio_caps())
         .build()
         .context("capsfilter missing")?;

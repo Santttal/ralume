@@ -28,7 +28,15 @@ pub struct Sources {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UiRecordingState {
     Idle,
+    Preparing,
     Recording,
+    Finalizing,
+}
+
+impl UiRecordingState {
+    pub fn is_active(self) -> bool {
+        matches!(self, Self::Preparing | Self::Recording | Self::Finalizing)
+    }
 }
 
 pub struct AppWindow {
@@ -39,10 +47,12 @@ pub struct AppWindow {
     switch_screen: gtk::Switch,
     switch_sys: gtk::Switch,
     switch_mic: gtk::Switch,
+    toast_overlay: adw::ToastOverlay,
     state: Rc<RefCell<UiRecordingState>>,
     timer_source: Rc<RefCell<Option<glib::SourceId>>>,
     pipeline: Rc<RefCell<Option<gst::Pipeline>>>,
     bus_guard: Rc<RefCell<Option<glib::SourceId>>>,
+    force_null_watchdog: Rc<RefCell<Option<glib::SourceId>>>,
     cmd_tx: Sender<UiCommand>,
     evt_tx: Sender<RecorderEvent>,
 }
@@ -131,11 +141,14 @@ impl AppWindow {
         lbl_status.add_css_class("dim-label");
         root.append(&lbl_status);
 
+        let toast_overlay = adw::ToastOverlay::new();
+        toast_overlay.set_child(Some(&root));
+
         let main_box = gtk::Box::builder()
             .orientation(gtk::Orientation::Vertical)
             .build();
         main_box.append(&header);
-        main_box.append(&root);
+        main_box.append(&toast_overlay);
         window.set_content(Some(&main_box));
 
         let this = Rc::new(Self {
@@ -146,10 +159,12 @@ impl AppWindow {
             switch_screen,
             switch_sys,
             switch_mic,
+            toast_overlay,
             state: Rc::new(RefCell::new(UiRecordingState::Idle)),
             timer_source: Rc::new(RefCell::new(None)),
             pipeline: Rc::new(RefCell::new(None)),
             bus_guard: Rc::new(RefCell::new(None)),
+            force_null_watchdog: Rc::new(RefCell::new(None)),
             cmd_tx,
             evt_tx,
         });
@@ -162,6 +177,17 @@ impl AppWindow {
                     me.on_start_stop_clicked().await;
                 }
             });
+        });
+
+        let weak_close = Rc::downgrade(&this);
+        this.window.connect_close_request(move |_| {
+            if let Some(me) = weak_close.upgrade() {
+                if me.state().is_active() {
+                    me.prompt_close_confirmation();
+                    return glib::signal::Inhibit(true);
+                }
+            }
+            glib::signal::Inhibit(false)
         });
 
         this
@@ -192,14 +218,26 @@ impl AppWindow {
         match state {
             UiRecordingState::Idle => {
                 self.btn_start_stop.set_label("Начать запись");
+                self.btn_start_stop.set_sensitive(true);
                 self.btn_start_stop.remove_css_class("destructive-action");
                 self.btn_start_stop.add_css_class("suggested-action");
                 self.set_sources_sensitive(true);
             }
+            UiRecordingState::Preparing => {
+                self.btn_start_stop.set_label("Подготовка…");
+                self.btn_start_stop.set_sensitive(false);
+                self.set_sources_sensitive(false);
+            }
             UiRecordingState::Recording => {
                 self.btn_start_stop.set_label("Остановить");
+                self.btn_start_stop.set_sensitive(true);
                 self.btn_start_stop.remove_css_class("suggested-action");
                 self.btn_start_stop.add_css_class("destructive-action");
+                self.set_sources_sensitive(false);
+            }
+            UiRecordingState::Finalizing => {
+                self.btn_start_stop.set_label("Сохранение…");
+                self.btn_start_stop.set_sensitive(false);
                 self.set_sources_sensitive(false);
             }
         }
@@ -213,6 +251,17 @@ impl AppWindow {
 
     pub fn set_status(&self, text: &str) {
         self.lbl_status.set_label(text);
+    }
+
+    pub fn show_toast(&self, text: &str) {
+        let trimmed = if text.chars().count() > 120 {
+            let cut: String = text.chars().take(117).collect();
+            format!("{cut}…")
+        } else {
+            text.to_owned()
+        };
+        let toast = adw::Toast::builder().title(&trimmed).timeout(5).build();
+        self.toast_overlay.add_toast(toast);
     }
 
     pub fn start_timer(&self) {
@@ -243,6 +292,7 @@ impl AppWindow {
             while let Ok(evt) = evt_rx.recv().await {
                 match evt {
                     RecorderEvent::PortalOpened => {
+                        window.set_recording_state(UiRecordingState::Preparing);
                         window.set_status("Настройка источника…");
                     }
                     RecorderEvent::ScreenCastReady {
@@ -253,11 +303,13 @@ impl AppWindow {
                         window.on_screencast_ready(fd, node_id, output_path);
                     }
                     RecorderEvent::RecordingStarted => {
+                        window.cancel_force_null_watchdog();
                         window.set_recording_state(UiRecordingState::Recording);
                         window.set_status("Запись…");
                         window.start_timer();
                     }
                     RecorderEvent::RecordingStopped { output_path } => {
+                        window.cancel_force_null_watchdog();
                         if let Some(src) = window.bus_guard.borrow_mut().take() {
                             src.remove();
                         }
@@ -269,6 +321,7 @@ impl AppWindow {
                         let _ = window.cmd_tx.send(UiCommand::StopRequested).await;
                     }
                     RecorderEvent::Error(msg) => {
+                        window.cancel_force_null_watchdog();
                         if let Some(src) = window.bus_guard.borrow_mut().take() {
                             src.remove();
                         }
@@ -277,7 +330,8 @@ impl AppWindow {
                         }
                         window.set_recording_state(UiRecordingState::Idle);
                         window.stop_timer();
-                        window.set_status(&format!("Ошибка: {}", msg));
+                        window.set_status("Ошибка записи");
+                        window.show_toast(&format!("Ошибка: {msg}"));
                         let _ = window.cmd_tx.send(UiCommand::StopRequested).await;
                     }
                     RecorderEvent::Cancelled => {
@@ -342,6 +396,8 @@ impl AppWindow {
     async fn on_start_stop_clicked(&self) {
         match self.state() {
             UiRecordingState::Idle => {
+                self.set_recording_state(UiRecordingState::Preparing);
+                self.set_status("Открываю диалог portal…");
                 let parent = self.window_identifier().await;
                 let cmd = UiCommand::StartRequested {
                     sources: self.sources_snapshot(),
@@ -350,19 +406,103 @@ impl AppWindow {
                 tracing::info!("start clicked");
                 if let Err(err) = self.cmd_tx.send(cmd).await {
                     tracing::error!(%err, "failed to send StartRequested");
+                    self.set_recording_state(UiRecordingState::Idle);
                 }
             }
             UiRecordingState::Recording => {
                 tracing::info!("stop clicked");
-                self.set_status("Сохранение…");
-                let pipeline_snapshot = self.pipeline.borrow().clone();
-                if let Some(p) = pipeline_snapshot {
-                    stop_graceful(&p);
-                } else {
-                    tracing::warn!("stop clicked but no pipeline");
-                    let _ = self.cmd_tx.send(UiCommand::StopRequested).await;
-                }
+                self.initiate_stop();
+            }
+            UiRecordingState::Preparing | UiRecordingState::Finalizing => {
+                tracing::debug!("start/stop clicked in transitional state — ignoring");
             }
         }
+    }
+
+    fn initiate_stop(&self) {
+        self.set_recording_state(UiRecordingState::Finalizing);
+        self.set_status("Сохранение…");
+        let pipeline_snapshot = self.pipeline.borrow().clone();
+        if let Some(p) = pipeline_snapshot {
+            stop_graceful(&p);
+            self.arm_force_null_watchdog();
+        } else {
+            tracing::warn!("stop requested but no pipeline");
+            let evt_tx = self.evt_tx.clone();
+            glib::MainContext::default().spawn_local(async move {
+                let _ = evt_tx.send(RecorderEvent::Cancelled).await;
+            });
+        }
+    }
+
+    fn arm_force_null_watchdog(&self) {
+        self.cancel_force_null_watchdog();
+        let pipeline_cell = self.pipeline.clone();
+        let bus_cell = self.bus_guard.clone();
+        let evt_tx = self.evt_tx.clone();
+        let src = glib::timeout_add_seconds_local(5, move || {
+            if let Some(p) = pipeline_cell.borrow_mut().take() {
+                tracing::warn!("EOS timeout (5s), forcing Null");
+                let _ = p.set_state(gst::State::Null);
+            }
+            if let Some(watch) = bus_cell.borrow_mut().take() {
+                watch.remove();
+            }
+            let tx = evt_tx.clone();
+            glib::MainContext::default().spawn_local(async move {
+                let _ = tx
+                    .send(RecorderEvent::Error(
+                        "EOS timeout: pipeline не завершился за 5 с, файл может быть обрезан"
+                            .into(),
+                    ))
+                    .await;
+            });
+            glib::Continue(false)
+        });
+        *self.force_null_watchdog.borrow_mut() = Some(src);
+    }
+
+    fn cancel_force_null_watchdog(&self) {
+        if let Some(src) = self.force_null_watchdog.borrow_mut().take() {
+            src.remove();
+        }
+    }
+
+    fn prompt_close_confirmation(self: &Rc<Self>) {
+        let dialog = gtk::MessageDialog::builder()
+            .transient_for(&self.window)
+            .modal(true)
+            .buttons(gtk::ButtonsType::None)
+            .message_type(gtk::MessageType::Question)
+            .text("Идёт запись")
+            .secondary_text("Остановить запись и сохранить файл перед выходом?")
+            .build();
+        dialog.add_button("Отмена", gtk::ResponseType::Cancel);
+        dialog.add_button("Остановить и выйти", gtk::ResponseType::Accept);
+        dialog.set_default_response(gtk::ResponseType::Cancel);
+
+        let weak_self = Rc::downgrade(self);
+        dialog.connect_response(move |d, response| {
+            d.close();
+            if response != gtk::ResponseType::Accept {
+                return;
+            }
+            let Some(me) = weak_self.upgrade() else {
+                return;
+            };
+            // Инициируем stop; закрываем окно после RecordingStopped.
+            me.initiate_stop();
+            let win = me.window.clone();
+            let state_cell = me.state.clone();
+            glib::timeout_add_local(std::time::Duration::from_millis(200), move || {
+                if matches!(*state_cell.borrow(), UiRecordingState::Idle) {
+                    win.destroy();
+                    glib::Continue(false)
+                } else {
+                    glib::Continue(true)
+                }
+            });
+        });
+        dialog.present();
     }
 }
