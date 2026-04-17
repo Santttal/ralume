@@ -162,6 +162,10 @@ pub fn add_system_audio_branch(pipeline: &gst::Pipeline, monitor_source: &str) -
         .name("sys_ares")
         .build()
         .context("audioresample missing")?;
+    let arate = gst::ElementFactory::make("audiorate")
+        .name("sys_arate")
+        .build()
+        .context("audiorate missing")?;
     let capsf = gst::ElementFactory::make("capsfilter")
         .name("sys_capsf")
         .property("caps", audio_caps())
@@ -180,8 +184,8 @@ pub fn add_system_audio_branch(pipeline: &gst::Pipeline, monitor_source: &str) -
         .build()
         .context("opusenc missing (gstreamer1.0-plugins-base?)")?;
 
-    pipeline.add_many(&[&src, &aconv, &ares, &capsf, &aqueue, &aenc])?;
-    gst::Element::link_many(&[&src, &aconv, &ares, &capsf, &aqueue, &aenc])?;
+    pipeline.add_many(&[&src, &aconv, &ares, &arate, &capsf, &aqueue, &aenc])?;
+    gst::Element::link_many(&[&src, &aconv, &ares, &arate, &capsf, &aqueue, &aenc])?;
 
     link_to_mux(pipeline, &aenc)?;
     tracing::info!(device = %monitor_source, "system audio branch attached");
@@ -200,6 +204,10 @@ pub fn add_mic_branch(pipeline: &gst::Pipeline, mic_source: &str) -> Result<()> 
     let ares = gst::ElementFactory::make("audioresample")
         .name("mic_ares")
         .build()?;
+    let arate = gst::ElementFactory::make("audiorate")
+        .name("mic_arate")
+        .build()
+        .context("audiorate missing")?;
     let capsf = gst::ElementFactory::make("capsfilter")
         .name("mic_capsf")
         .property("caps", audio_caps())
@@ -216,8 +224,8 @@ pub fn add_mic_branch(pipeline: &gst::Pipeline, mic_source: &str) -> Result<()> 
         .build()
         .context("opusenc missing (gstreamer1.0-plugins-base?)")?;
 
-    pipeline.add_many(&[&src, &aconv, &ares, &capsf, &aqueue, &aenc])?;
-    gst::Element::link_many(&[&src, &aconv, &ares, &capsf, &aqueue, &aenc])?;
+    pipeline.add_many(&[&src, &aconv, &ares, &arate, &capsf, &aqueue, &aenc])?;
+    gst::Element::link_many(&[&src, &aconv, &ares, &arate, &capsf, &aqueue, &aenc])?;
 
     link_to_mux(pipeline, &aenc)?;
     tracing::info!(device = %mic_source, "mic branch attached");
