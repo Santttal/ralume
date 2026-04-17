@@ -8,7 +8,7 @@ use gstreamer::prelude::*;
 use gtk::glib;
 use gtk4 as gtk;
 
-use crate::recorder::audio::{detect_audio_devices, AudioDevices};
+use crate::recorder::audio::{detect_audio_devices, ensure_source_volume_full, AudioDevices};
 use crate::ui::events::RecorderEvent;
 
 #[derive(Debug, Clone)]
@@ -151,6 +151,9 @@ fn audio_caps() -> gst::Caps {
 }
 
 pub fn add_system_audio_branch(pipeline: &gst::Pipeline, monitor_source: &str) -> Result<()> {
+    if let Err(e) = ensure_source_volume_full(monitor_source) {
+        tracing::warn!(%e, "failed to ensure monitor source volume");
+    }
     let src = gst::ElementFactory::make("pulsesrc")
         .name("sys_src")
         .property("device", monitor_source)

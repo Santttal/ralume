@@ -36,6 +36,34 @@ pub fn detect_audio_devices() -> Result<AudioDevices> {
     })
 }
 
+/// Поднимает громкость source-устройства до 100%, если она ниже 90%.
+/// Нужно для monitor-источников: PulseAudio иногда запоминает их громкость на уровне 20%,
+/// и запись идёт, но очень тихая.
+pub fn ensure_source_volume_full(source: &str) -> Result<()> {
+    let volumes = pactl(&["get-source-volume", source])?;
+    let percent = parse_volume_percent(&volumes).unwrap_or(100);
+    if percent < 90 {
+        tracing::warn!(
+            %source,
+            current_percent = percent,
+            "monitor source volume is low, bumping to 100%"
+        );
+        pactl(&["set-source-volume", source, "100%"])?;
+    } else {
+        tracing::debug!(%source, current_percent = percent, "source volume ok");
+    }
+    Ok(())
+}
+
+fn parse_volume_percent(pactl_out: &str) -> Option<u32> {
+    // Пример: "Volume: front-left: 13107 /  20% / -41,94 dB,   front-right: ..."
+    pactl_out
+        .split('%')
+        .next()
+        .and_then(|seg| seg.rsplit(|c: char| !c.is_ascii_digit()).find(|s| !s.is_empty()))
+        .and_then(|n| n.parse::<u32>().ok())
+}
+
 fn pactl(args: &[&str]) -> Result<String> {
     let out = Command::new("pactl")
         .args(args)
