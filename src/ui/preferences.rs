@@ -178,8 +178,8 @@ fn build_recording_page(
 
     video_group.add(&make_spin_row(
         "FPS",
-        "Кадров в секунду",
-        15,
+        "Кадров в секунду (5 достаточно для статичного экрана)",
+        5,
         60,
         1,
         settings.read().unwrap().fps as i32,
