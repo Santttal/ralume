@@ -76,7 +76,9 @@ pub fn build_video_pipeline(fd: RawFd, node_id: u32, output_path: &Path) -> Resu
 
     let vqueue = gst::ElementFactory::make("queue")
         .name("vqueue")
-        .property("max-size-time", 200_000_000u64)
+        .property("max-size-time", 2_000_000_000u64)
+        .property("max-size-buffers", 0u32)
+        .property("max-size-bytes", 0u32)
         .build()
         .context("queue missing")?;
 
@@ -87,7 +89,7 @@ pub fn build_video_pipeline(fd: RawFd, node_id: u32, output_path: &Path) -> Resu
         .build()
         .context("x264enc missing (gstreamer1.0-plugins-ugly?)")?;
     venc.set_property_from_str("tune", "stillimage");
-    venc.set_property_from_str("speed-preset", "slow");
+    venc.set_property_from_str("speed-preset", "veryfast");
 
     let vparse = gst::ElementFactory::make("h264parse")
         .name("vparse")
@@ -167,6 +169,9 @@ pub fn add_system_audio_branch(pipeline: &gst::Pipeline, monitor_source: &str) -
         .context("capsfilter missing")?;
     let aqueue = gst::ElementFactory::make("queue")
         .name("sys_aqueue")
+        .property("max-size-time", 2_000_000_000u64)
+        .property("max-size-buffers", 0u32)
+        .property("max-size-bytes", 0u32)
         .build()
         .context("queue missing")?;
     let aenc = gst::ElementFactory::make("opusenc")
@@ -201,6 +206,9 @@ pub fn add_mic_branch(pipeline: &gst::Pipeline, mic_source: &str) -> Result<()> 
         .build()?;
     let aqueue = gst::ElementFactory::make("queue")
         .name("mic_aqueue")
+        .property("max-size-time", 2_000_000_000u64)
+        .property("max-size-buffers", 0u32)
+        .property("max-size-bytes", 0u32)
         .build()?;
     let aenc = gst::ElementFactory::make("opusenc")
         .name("mic_aenc")
