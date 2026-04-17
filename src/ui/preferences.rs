@@ -7,7 +7,11 @@ use gtk::glib;
 use libadwaita as adw;
 use gtk4 as gtk;
 
-use crate::config::{AudioMode, Container, CursorMode, RegionMode, Settings, SharedSettings, VideoCodec};
+use crate::config::{
+    AudioMode, Container, CursorMode, EncoderHint, RegionMode, Settings, SharedSettings,
+    VideoCodec,
+};
+use crate::recorder::encoders::detect_available_encoders;
 
 const SAVE_DEBOUNCE_MS: u64 = 500;
 
@@ -199,6 +203,63 @@ fn build_recording_page(
         settings,
         save_pending,
     ));
+
+    let hint_row = make_combo_row(
+        "Энкодер",
+        &["Авто (HW → SW fallback)", "Только HW (VAAPI/NVENC/QSV)", "Только SW (x264enc)"],
+        encoder_hint_to_index(settings.read().unwrap().encoder_hint),
+    );
+    {
+        let settings = settings.clone();
+        let save_pending = save_pending.clone();
+        hint_row.connect_selected_notify(move |row| {
+            settings.write().unwrap().encoder_hint = encoder_hint_from_index(row.selected());
+            schedule_save(&settings, &save_pending);
+        });
+    }
+    video_group.add(&hint_row);
+
+    let detect_row = adw::ActionRow::builder()
+        .title("Проверить доступные энкодеры")
+        .subtitle("Откроет список factory-имён, обнаруженных GStreamer")
+        .build();
+    let detect_btn = gtk::Button::builder()
+        .label("Показать")
+        .valign(gtk::Align::Center)
+        .build();
+    detect_btn.add_css_class("flat");
+    let page_weak = page.downgrade();
+    detect_btn.connect_clicked(move |_| {
+        let encoders = detect_available_encoders();
+        let body = if encoders.is_empty() {
+            "Видео-энкодеры не обнаружены. Проверь gstreamer1.0-plugins-ugly / libva.".to_owned()
+        } else {
+            encoders
+                .iter()
+                .map(|e| format!("• {}  —  {}", e.factory_name, e.backend.label()))
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        let parent_win = page_weak
+            .upgrade()
+            .and_then(|p| p.root())
+            .and_then(|r| r.downcast::<gtk::Window>().ok());
+        let dialog = gtk::MessageDialog::builder()
+            .modal(true)
+            .message_type(gtk::MessageType::Info)
+            .buttons(gtk::ButtonsType::Close)
+            .text("Доступные энкодеры")
+            .secondary_text(body)
+            .build();
+        if let Some(w) = parent_win.as_ref() {
+            dialog.set_transient_for(Some(w));
+        }
+        dialog.connect_response(|d, _| d.close());
+        dialog.present();
+    });
+    detect_row.add_suffix(&detect_btn);
+    video_group.add(&detect_row);
+
     page.add(&video_group);
 
     // ── Группа «Источник»
@@ -430,6 +491,21 @@ fn cursor_from_index(i: u32) -> CursorMode {
         0 => CursorMode::Hidden,
         2 => CursorMode::Metadata,
         _ => CursorMode::Embedded,
+    }
+}
+
+fn encoder_hint_to_index(h: EncoderHint) -> u32 {
+    match h {
+        EncoderHint::Auto => 0,
+        EncoderHint::Hardware => 1,
+        EncoderHint::Software => 2,
+    }
+}
+fn encoder_hint_from_index(i: u32) -> EncoderHint {
+    match i {
+        1 => EncoderHint::Hardware,
+        2 => EncoderHint::Software,
+        _ => EncoderHint::Auto,
     }
 }
 

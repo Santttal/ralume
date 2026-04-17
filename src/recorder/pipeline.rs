@@ -8,8 +8,11 @@ use gstreamer::prelude::*;
 use gtk::glib;
 use gtk4 as gtk;
 
-use crate::config::{AudioMode, Settings};
+use crate::config::{AudioMode, EncoderHint, Settings};
 use crate::recorder::audio::{detect_audio_devices, ensure_source_volume_full, AudioDevices};
+use crate::recorder::encoders::{
+    preencoder_converter_factory, Codec, HwHint, VideoEncoder,
+};
 use crate::ui::events::RecorderEvent;
 
 #[derive(Debug, Clone)]
@@ -100,16 +103,27 @@ pub fn build_video_pipeline(
         .build()
         .context("queue missing")?;
 
-    let venc = gst::ElementFactory::make("x264enc")
-        .name("venc")
-        .property("bitrate", settings.video_bitrate)
-        .property("key-int-max", settings.fps * 10) // keyframe каждые ~10 с
-        .property("bframes", 0u32)
-        .property("byte-stream", false)
-        .build()
-        .context("x264enc missing (gstreamer1.0-plugins-ugly?)")?;
-    venc.set_property_from_str("tune", "zerolatency");
-    venc.set_property_from_str("speed-preset", "veryfast");
+    let hint = match settings.encoder_hint {
+        EncoderHint::Auto => HwHint::Auto,
+        EncoderHint::Hardware => HwHint::ForceHw,
+        EncoderHint::Software => HwHint::ForceSw,
+    };
+    let encoder = match VideoEncoder::for_codec(Codec::H264, hint, settings.video_bitrate) {
+        Ok(e) => e,
+        Err(err) if hint != HwHint::ForceHw => {
+            tracing::warn!(%err, "HW encoder unavailable, falling back to x264enc");
+            VideoEncoder::for_codec(Codec::H264, HwHint::ForceSw, settings.video_bitrate)?
+        }
+        Err(err) => return Err(err),
+    };
+    let venc = encoder.element.clone();
+    let backend = encoder.info.backend;
+    // key-int-max зависит от fps для всех энкодеров, где оно поддерживается
+    if venc.has_property("key-int-max", None) {
+        venc.set_property("key-int-max", settings.fps * 10);
+    } else if venc.has_property("keyframe-period", None) {
+        venc.set_property("keyframe-period", settings.fps * 10);
+    }
 
     let vparse = gst::ElementFactory::make("h264parse")
         .name("vparse")
@@ -127,28 +141,29 @@ pub fn build_video_pipeline(
         .build()
         .context("filesink missing")?;
 
-    pipeline.add_many(&[
-        &src,
-        &vconv,
-        &vrate,
-        &vrate_filter,
-        &vqueue,
-        &venc,
-        &vparse,
-        &mux,
-        &fsink,
-    ])?;
-    gst::Element::link_many(&[
-        &src,
-        &vconv,
-        &vrate,
-        &vrate_filter,
-        &vqueue,
-        &venc,
-        &vparse,
-        &mux,
-        &fsink,
-    ])?;
+    // Для HW-бекендов вставляем отдельный uploader/convert перед энкодером.
+    let hw_pre: Option<gst::Element> = if backend.is_hw() {
+        let factory = preencoder_converter_factory(backend);
+        gst::ElementFactory::make(factory)
+            .name("hw_pre")
+            .build()
+            .ok()
+            .or_else(|| {
+                tracing::warn!(%factory, "HW pre-encoder element missing, HW path may fail");
+                None
+            })
+    } else {
+        None
+    };
+
+    let mut elements: Vec<&gst::Element> = vec![&src, &vconv, &vrate, &vrate_filter, &vqueue];
+    if let Some(ref e) = hw_pre {
+        elements.push(e);
+    }
+    elements.extend([&venc, &vparse, &mux, &fsink]);
+
+    pipeline.add_many(&elements)?;
+    gst::Element::link_many(&elements)?;
 
     tracing::debug!(
         fd,

@@ -54,6 +54,14 @@ pub enum RegionMode {
     Window,
 }
 
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum EncoderHint {
+    Auto,
+    Hardware,
+    Software,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(default)]
 pub struct Settings {
@@ -66,6 +74,7 @@ pub struct Settings {
     pub audio_mode: AudioMode,
     pub cursor_mode: CursorMode,
     pub region_mode: RegionMode,
+    pub encoder_hint: EncoderHint,
     pub hotkey_start_stop: String,
 }
 
@@ -85,6 +94,7 @@ impl Default for Settings {
             audio_mode: AudioMode::Mixed,
             cursor_mode: CursorMode::Embedded,
             region_mode: RegionMode::Monitor,
+            encoder_hint: EncoderHint::Auto,
             hotkey_start_stop: "<Ctrl><Alt>R".to_owned(),
         }
     }

@@ -1,6 +1,7 @@
 //! Recorder-модуль: GStreamer pipeline, state machine, захват аудио/видео.
 
 pub mod audio;
+pub mod encoders;
 pub mod output;
 pub mod pipeline;
 
