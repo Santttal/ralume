@@ -7,6 +7,7 @@ docs/
 *.mkv
 *.mp4
 *.webm
+*.wav
 
 
 # Added by cargo
