@@ -26,6 +26,20 @@ pub fn build_video_pipeline(fd: RawFd, node_id: u32, output_path: &Path) -> Resu
         .build()
         .context("videoconvert missing")?;
 
+    let vrate = gst::ElementFactory::make("videorate")
+        .name("vrate")
+        .build()
+        .context("videorate missing")?;
+
+    let vrate_caps = gst::Caps::builder("video/x-raw")
+        .field("framerate", gst::Fraction::new(10, 1))
+        .build();
+    let vrate_filter = gst::ElementFactory::make("capsfilter")
+        .name("vrate_filter")
+        .property("caps", &vrate_caps)
+        .build()
+        .context("capsfilter missing")?;
+
     let vqueue = gst::ElementFactory::make("queue")
         .name("vqueue")
         .property("max-size-time", 200_000_000u64)
@@ -34,12 +48,12 @@ pub fn build_video_pipeline(fd: RawFd, node_id: u32, output_path: &Path) -> Resu
 
     let venc = gst::ElementFactory::make("x264enc")
         .name("venc")
-        .property("bitrate", 8000u32)
-        .property("key-int-max", 60u32)
+        .property("bitrate", 2500u32)
+        .property("key-int-max", 100u32)
         .build()
         .context("x264enc missing (gstreamer1.0-plugins-ugly?)")?;
-    venc.set_property_from_str("tune", "zerolatency");
-    venc.set_property_from_str("speed-preset", "veryfast");
+    venc.set_property_from_str("tune", "stillimage");
+    venc.set_property_from_str("speed-preset", "slow");
 
     let vparse = gst::ElementFactory::make("h264parse")
         .name("vparse")
@@ -57,8 +71,28 @@ pub fn build_video_pipeline(fd: RawFd, node_id: u32, output_path: &Path) -> Resu
         .build()
         .context("filesink missing")?;
 
-    pipeline.add_many(&[&src, &vconv, &vqueue, &venc, &vparse, &mux, &fsink])?;
-    gst::Element::link_many(&[&src, &vconv, &vqueue, &venc, &vparse, &mux, &fsink])?;
+    pipeline.add_many(&[
+        &src,
+        &vconv,
+        &vrate,
+        &vrate_filter,
+        &vqueue,
+        &venc,
+        &vparse,
+        &mux,
+        &fsink,
+    ])?;
+    gst::Element::link_many(&[
+        &src,
+        &vconv,
+        &vrate,
+        &vrate_filter,
+        &vqueue,
+        &venc,
+        &vparse,
+        &mux,
+        &fsink,
+    ])?;
 
     tracing::debug!(
         fd,
