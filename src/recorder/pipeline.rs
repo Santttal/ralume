@@ -86,9 +86,11 @@ pub fn build_video_pipeline(fd: RawFd, node_id: u32, output_path: &Path) -> Resu
         .name("venc")
         .property("bitrate", 2500u32)
         .property("key-int-max", 100u32)
+        .property("bframes", 0u32)
+        .property("byte-stream", false)
         .build()
         .context("x264enc missing (gstreamer1.0-plugins-ugly?)")?;
-    venc.set_property_from_str("tune", "stillimage");
+    venc.set_property_from_str("tune", "zerolatency");
     venc.set_property_from_str("speed-preset", "veryfast");
 
     let vparse = gst::ElementFactory::make("h264parse")
