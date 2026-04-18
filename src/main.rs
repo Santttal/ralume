@@ -45,6 +45,7 @@ fn main() -> glib::ExitCode {
 
     app.connect_startup(|_| {
         style::load_css();
+        gtk::Window::set_default_icon_name(APP_ID);
     });
 
     let evt_rx_cell: Rc<RefCell<Option<Receiver<RecorderEvent>>>> =
