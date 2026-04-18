@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build a release binary + pack it with data/, scripts/, README, LICENSE into
-# screen-recorder-linux-x86_64.tar.gz suitable for GitHub Releases.
+# ralume-<version>-linux-x86_64.tar.gz suitable for GitHub Releases.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -8,7 +8,7 @@ ROOT="$PWD"
 export PATH="$HOME/.cargo/bin:$PATH"
 
 VERSION="${VERSION:-$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)}"
-PKG_NAME="screen-recorder-${VERSION}-linux-x86_64"
+PKG_NAME="ralume-${VERSION}-linux-x86_64"
 STAGE="$ROOT/dist/$PKG_NAME"
 OUT_TAR="$ROOT/dist/$PKG_NAME.tar.gz"
 
@@ -19,15 +19,15 @@ echo "→ stage in $STAGE"
 rm -rf "$STAGE"
 mkdir -p "$STAGE/scripts" "$STAGE/data"
 
-cp target/release/screen_record "$STAGE/"
-cp data/dev.local.ScreenRecord.desktop "$STAGE/data/"
+cp target/release/ralume "$STAGE/"
+cp data/dev.local.Ralume.desktop "$STAGE/data/"
 cp -r data/icons "$STAGE/data/"
 cp data/style.css "$STAGE/data/"
 cp scripts/install.sh "$STAGE/scripts/"
 cp README.md LICENSE "$STAGE/"
 
 echo "→ strip binary"
-strip "$STAGE/screen_record" || true
+strip "$STAGE/ralume" || true
 
 echo "→ create $OUT_TAR"
 cd "$ROOT/dist"

@@ -107,7 +107,7 @@ pub fn shared(s: Settings) -> SharedSettings {
 }
 
 pub fn config_path() -> Option<PathBuf> {
-    directories::ProjectDirs::from("dev", "local", "ScreenRecord")
+    directories::ProjectDirs::from("dev", "local", "Ralume")
         .map(|d| d.config_dir().join("settings.toml"))
 }
 

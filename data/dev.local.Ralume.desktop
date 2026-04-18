@@ -1,10 +1,10 @@
 [Desktop Entry]
-Name=Screen Record
+Name=Ralume
 Comment=Record your screen with system audio and microphone
-Exec=screen_record
-Icon=dev.local.ScreenRecord
+Exec=ralume
+Icon=dev.local.Ralume
 Terminal=false
 Type=Application
 Categories=AudioVideo;Recorder;
 StartupNotify=true
-StartupWMClass=dev.local.ScreenRecord
+StartupWMClass=dev.local.Ralume

@@ -69,7 +69,7 @@ impl AppWindow {
     ) -> Rc<Self> {
         let window = adw::ApplicationWindow::builder()
             .application(app)
-            .title("Screen Record")
+            .title("Ralume")
             .default_width(420)
             .default_height(320)
             .build();

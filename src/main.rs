@@ -22,7 +22,7 @@ use ui::preferences::PreferencesWindow;
 use ui::style;
 use ui::window::AppWindow;
 
-const APP_ID: &str = "dev.local.ScreenRecord";
+const APP_ID: &str = "dev.local.Ralume";
 
 fn main() -> glib::ExitCode {
     tracing_subscriber::fmt()
@@ -97,8 +97,8 @@ fn wire_window_actions(app: &Application, window: &Rc<AppWindow>, settings: Shar
     let parent = window.window().clone();
     act_about.connect_activate(move |_, _| {
         let about = gtk::AboutDialog::builder()
-            .program_name("Screen Record")
-            .logo_icon_name("dev.local.ScreenRecord")
+            .program_name("Ralume")
+            .logo_icon_name("dev.local.Ralume")
             .version(env!("CARGO_PKG_VERSION"))
             .comments("Запись экрана со звуком на Linux")
             .license_type(gtk::License::Gpl30)

@@ -66,7 +66,7 @@ pub fn build_video_pipeline(
     output_path: &Path,
     settings: &Settings,
 ) -> Result<gst::Pipeline> {
-    let pipeline = gst::Pipeline::new(Some("screen_record"));
+    let pipeline = gst::Pipeline::new(Some("ralume"));
 
     let src = gst::ElementFactory::make("pipewiresrc")
         .name("src")

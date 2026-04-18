@@ -9,7 +9,7 @@ pub struct PortalState {
 
 impl PortalState {
     pub fn path() -> Option<PathBuf> {
-        directories::ProjectDirs::from("dev", "local", "ScreenRecord")
+        directories::ProjectDirs::from("dev", "local", "Ralume")
             .map(|d| d.config_dir().join("state.json"))
     }
 

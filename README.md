@@ -1,7 +1,7 @@
-# Screen Record
+# Ralume
 
 Simple Linux screen recorder with independent speaker/microphone audio toggles,
-built on Wayland-first stack: xdg-desktop-portal ScreenCast + PipeWire +
+built on a Wayland-first stack: xdg-desktop-portal ScreenCast + PipeWire +
 GStreamer + GTK4/libadwaita.
 
 ![status](https://img.shields.io/badge/status-MVP-blue) ![license](https://img.shields.io/badge/license-GPL--3.0-green) ![platform](https://img.shields.io/badge/platform-Linux-lightgrey)
@@ -27,12 +27,12 @@ GStreamer + GTK4/libadwaita.
 
 1. Download the latest release:
    ```
-   wget https://github.com/Santttal/screen-recorder/releases/latest/download/screen-recorder-linux-x86_64.tar.gz
-   tar xzf screen-recorder-linux-x86_64.tar.gz
-   cd screen-recorder-*
+   wget https://github.com/Santttal/screen-recorder/releases/latest/download/ralume-linux-x86_64.tar.gz
+   tar xzf ralume-linux-x86_64.tar.gz
+   cd ralume-*
    ./scripts/install.sh
    ```
-2. Launch from the app menu or run `screen_record` in a terminal.
+2. Launch from the app menu or run `ralume` in a terminal.
 
 Pre-built binaries target Ubuntu 22.04+ / Fedora 38+ / Arch (current) with the
 following runtime dependencies installed:
@@ -107,7 +107,7 @@ You can force a specific backend in **Preferences → Video → Encoder**.
   the filename only; real remux via `ffmpeg -c copy` is on the roadmap.
 - Global hotkeys are stored but not registered (needs `GlobalShortcuts`
   portal; on some compositors it is unavailable).
-- localization is Russian-only for now; `en.po` coming before first Flatpak.
+- Localization is Russian-only for now; `en.po` coming before first Flatpak.
 
 ## Roadmap
 
@@ -126,3 +126,9 @@ GPL-3.0-or-later — see [LICENSE](LICENSE).
 
 Inspired by [Kooha](https://github.com/SeaDve/Kooha) and the
 [xdg-desktop-portal](https://flatpak.github.io/xdg-desktop-portal/) team.
+
+## Why "Ralume"?
+
+A short, abstract coined name evoking *ra* (as in raster, ray) + *lume*
+(light, luminance). Chosen for search uniqueness — the app name should not
+collide with existing video/recording products.
