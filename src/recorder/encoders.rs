@@ -144,16 +144,13 @@ fn apply_properties(element: &gst::Element, info: &EncoderInfo, bitrate_kbps: u3
             element.set_property_from_str("speed-preset", "veryfast");
         }
         "vaapih264enc" => {
-            // bitrate в vaapih264enc в kbps
+            // bitrate в vaapih264enc в kbps. rate-control не форсим — не все Intel iGPU
+            // поддерживают CBR/VBR; дефолт драйвера обычно cqp и всегда работает.
             element.set_property("bitrate", bitrate_kbps);
             element.set_property("keyframe-period", 100u32);
-            // Не все Intel iGPU поддерживают CBR — используем VBR (шире совместимость)
-            element.set_property_from_str("rate-control", "vbr");
         }
         "vah264enc" => {
-            // va-plugin принимает bitrate в kbps
             element.set_property("bitrate", bitrate_kbps);
-            element.set_property_from_str("rate-control", "vbr");
         }
         "nvh264enc" => {
             element.set_property("bitrate", bitrate_kbps);
