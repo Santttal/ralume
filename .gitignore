@@ -3,6 +3,7 @@ docs/
 .idea/
 
 /target
+/dist
 
 *.mkv
 *.mp4
