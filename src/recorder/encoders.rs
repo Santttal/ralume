@@ -42,7 +42,14 @@ pub struct EncoderInfo {
 }
 
 /// Порядок = приоритет при HwHint::Auto (сверху вниз).
+/// NVENC 7-го поколения на Turing (RTX 2060 Mobile) даёт лучшее качество/нагрузку,
+/// чем Intel VAAPI на Coffee Lake iGPU — поэтому идёт первым.
 const CANDIDATES: &[EncoderInfo] = &[
+    EncoderInfo {
+        factory_name: "nvh264enc",
+        codec: Codec::H264,
+        backend: Backend::Nvenc,
+    },
     EncoderInfo {
         factory_name: "vah264enc",
         codec: Codec::H264,
@@ -52,11 +59,6 @@ const CANDIDATES: &[EncoderInfo] = &[
         factory_name: "vaapih264enc",
         codec: Codec::H264,
         backend: Backend::Vaapi,
-    },
-    EncoderInfo {
-        factory_name: "nvh264enc",
-        codec: Codec::H264,
-        backend: Backend::Nvenc,
     },
     EncoderInfo {
         factory_name: "qsvh264enc",
@@ -153,9 +155,20 @@ fn apply_properties(element: &gst::Element, info: &EncoderInfo, bitrate_kbps: u3
             element.set_property("bitrate", bitrate_kbps);
         }
         "nvh264enc" => {
+            // Config для RTX 2060 Mobile (Turing, 7-th gen NVENC) на GStreamer 1.20.
+            // Преимущества: VBR-HQ с lookahead и B-frames для экранной записи
+            // (мостаточно статичный контент, B-frames снижают размер).
             element.set_property("bitrate", bitrate_kbps);
-            element.set_property_from_str("preset", "low-latency-hq");
-            element.set_property_from_str("rc-mode", "cbr");
+            element.set_property("max-bitrate", bitrate_kbps.saturating_mul(2));
+            element.set_property("bframes", 2u32);
+            element.set_property("rc-lookahead", 16u32);
+            element.set_property("b-adapt", true);
+            element.set_property("spatial-aq", true);
+            element.set_property("aq-strength", 8u32);
+            element.set_property("aud", true);
+            element.set_property("zerolatency", false);
+            element.set_property_from_str("preset", "hq");
+            element.set_property_from_str("rc-mode", "vbr-hq");
         }
         "qsvh264enc" => {
             element.set_property("bitrate", bitrate_kbps);
@@ -166,19 +179,18 @@ fn apply_properties(element: &gst::Element, info: &EncoderInfo, bitrate_kbps: u3
 }
 
 /// Какой элемент преобразования цвета нужен перед HW-энкодером.
-/// Для VAAPI на многих Intel iGPU VPP недоступен — используем SW videoconvert + явный NV12 caps.
-pub fn preencoder_converter_factory(backend: Backend) -> &'static str {
-    match backend {
-        // VPP (vaapipostproc/vapostproc) часто не работает на встроенных GPU →
-        // полагаемся на SW videoconvert для преобразования в NV12.
-        Backend::Vaapi | Backend::VaNew => "videoconvert",
-        Backend::Nvenc => "nvvidconv",
-        Backend::Qsv => "videoconvert",
-        Backend::Software => "videoconvert",
-    }
+/// Используем SW `videoconvert` во всех случаях — на MVP простота важнее копии буфера:
+/// - VPP (vaapipostproc/vapostproc) на многих Intel iGPU недоступен.
+/// - nvvidconv существует только для Tegra; на desktop NVENC принимает system-memory NV12 напрямую.
+/// - Для нативного zero-copy нужен DMABuf + `glupload ! glcolorconvert`; отложено до будущих фаз.
+pub fn preencoder_converter_factory(_backend: Backend) -> &'static str {
+    "videoconvert"
 }
 
 /// Нужен ли явный capsfilter format=NV12 перед HW-энкодером.
 pub fn requires_nv12_caps(backend: Backend) -> bool {
-    matches!(backend, Backend::Vaapi | Backend::VaNew | Backend::Qsv)
+    matches!(
+        backend,
+        Backend::Vaapi | Backend::VaNew | Backend::Qsv | Backend::Nvenc
+    )
 }
