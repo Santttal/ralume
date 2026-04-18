@@ -156,19 +156,20 @@ fn apply_properties(element: &gst::Element, info: &EncoderInfo, bitrate_kbps: u3
         }
         "nvh264enc" => {
             // Config для RTX 2060 Mobile (Turing, 7-th gen NVENC) на GStreamer 1.20.
-            // Преимущества: VBR-HQ с lookahead и B-frames для экранной записи
-            // (мостаточно статичный контент, B-frames снижают размер).
+            // Важно: zerolatency + bframes=0 + rc-lookahead=0 — иначе энкодер копит кадры
+            // перед выдачей, matroskamux ждёт видео для sync, аудио-очередь
+            // переполняется, pulsesrc дропает сэмплы во время речи/музыки
+            // (та же проблема, что была с x264 в Фазе 5).
             element.set_property("bitrate", bitrate_kbps);
             element.set_property("max-bitrate", bitrate_kbps.saturating_mul(2));
-            element.set_property("bframes", 2u32);
-            element.set_property("rc-lookahead", 16u32);
-            element.set_property("b-adapt", true);
+            element.set_property("bframes", 0u32);
+            element.set_property("rc-lookahead", 0u32);
             element.set_property("spatial-aq", true);
             element.set_property("aq-strength", 8u32);
             element.set_property("aud", true);
-            element.set_property("zerolatency", false);
+            element.set_property("zerolatency", true);
             element.set_property_from_str("preset", "hq");
-            element.set_property_from_str("rc-mode", "vbr-hq");
+            element.set_property_from_str("rc-mode", "vbr");
         }
         "qsvh264enc" => {
             element.set_property("bitrate", bitrate_kbps);
