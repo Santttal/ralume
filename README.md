@@ -27,7 +27,7 @@ GStreamer + GTK4/libadwaita.
 
 1. Download the latest release:
    ```
-   wget https://github.com/Santttal/screen-recorder/releases/latest/download/ralume-linux-x86_64.tar.gz
+   wget https://github.com/Santttal/ralume/releases/latest/download/ralume-linux-x86_64.tar.gz
    tar xzf ralume-linux-x86_64.tar.gz
    cd ralume-*
    ./scripts/install.sh
@@ -58,7 +58,7 @@ Requires **Rust stable**, **GStreamer**, **GTK4**, **libadwaita** dev packages.
 
 ```
 # Clone
-git clone https://github.com/Santttal/screen-recorder.git
+git clone https://github.com/Santttal/ralume.git
 cd screen-recorder
 
 # Install runtime dev deps (Ubuntu 22.04 example)
