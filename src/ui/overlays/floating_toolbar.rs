@@ -169,6 +169,12 @@ impl FloatingToolbar {
         self.btn_mic.set_active(mic);
         self.btn_sys.set_active(sys);
         self.window.present();
+        // Переместить окно в нижнюю центральную часть экрана (отступ ~5% снизу)
+        // после того, как WM выделит ему геометрию и id.
+        let win = self.window.clone();
+        glib::timeout_add_local_once(std::time::Duration::from_millis(120), move || {
+            position_bottom_center(&win, 0.05);
+        });
     }
     pub fn hide(&self) {
         self.window.set_visible(false);
@@ -233,6 +239,36 @@ fn install_no_capture_hint(window: &gtk::Window) {
             }
         });
     });
+}
+
+/// Переставить окно в bottom-center первого монитора с `bottom_margin_pct`
+/// отступом снизу. Использует xdotool windowmove (X11).
+fn position_bottom_center(window: &gtk::Window, bottom_margin_pct: f64) {
+    let Some(display) = gtk::gdk::Display::default() else { return };
+    let monitors = display.monitors();
+    let Some(obj) = monitors.item(0) else { return };
+    let Ok(monitor) = obj.downcast::<gtk::gdk::Monitor>() else { return };
+    let geom = monitor.geometry();
+    let screen_w = geom.width();
+    let screen_h = geom.height();
+
+    let (tb_w, tb_h) = {
+        let a = window.allocation();
+        (a.width().max(window.width()), a.height().max(window.height()))
+    };
+    if tb_w <= 0 || tb_h <= 0 {
+        return;
+    }
+    let x = geom.x() + (screen_w - tb_w) / 2;
+    let margin = (screen_h as f64 * bottom_margin_pct).round() as i32;
+    let y = geom.y() + screen_h - tb_h - margin;
+
+    let Some(id) = x11_window_id(window) else { return };
+    let _ = std::process::Command::new("xdotool")
+        .args(["windowmove", &id, &x.to_string(), &y.to_string()])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
 }
 
 /// Возвращает X11 Window ID как hex-строку для xprop, если мы на X11.
