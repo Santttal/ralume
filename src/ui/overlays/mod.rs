@@ -2,3 +2,4 @@
 //! Phase 19.c.3 (countdown) + 19.c.4 (floating toolbar).
 
 pub mod countdown;
+pub mod floating_toolbar;

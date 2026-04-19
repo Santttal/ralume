@@ -50,6 +50,7 @@ pub struct AppShell {
     post_page: Rc<crate::ui::pages::post_record::PostRecordPage>,
     detail_page: Rc<crate::ui::pages::recording_detail::RecordingDetailPage>,
     ai_page: Rc<crate::ui::pages::ai::AiPage>,
+    floating: Rc<crate::ui::overlays::floating_toolbar::FloatingToolbar>,
     lbl_rec_dot: gtk::Label,
     toast_overlay: adw::ToastOverlay,
     state: Rc<RefCell<UiRecordingState>>,
@@ -214,6 +215,10 @@ impl AppShell {
         let btn_start_stop = page.btn_start_stop.clone();
         let seg_auto = page.seg_auto.clone();
 
+        // Floating toolbar (phase 19.c.4) — создаём заранее, показываем при Recording.
+        let floating =
+            crate::ui::overlays::floating_toolbar::FloatingToolbar::new(&window);
+
         let this = Rc::new(Self {
             window,
             page,
@@ -223,6 +228,7 @@ impl AppShell {
             post_page: post_page.clone(),
             detail_page,
             ai_page,
+            floating,
             lbl_rec_dot,
             toast_overlay,
             state: Rc::new(RefCell::new(UiRecordingState::Idle)),
@@ -241,6 +247,38 @@ impl AppShell {
             post_page.set_on_outcome(move |outcome| {
                 let Some(me) = weak_self.upgrade() else { return };
                 me.handle_post_outcome(outcome);
+            });
+        }
+
+        // Floating toolbar: Pause / Stop / mic-sys toggles (phase 19.c.4/5).
+        {
+            let weak_self = Rc::downgrade(&this);
+            this.floating.set_on_stop(move || {
+                let Some(me) = weak_self.upgrade() else { return };
+                me.initiate_stop();
+            });
+        }
+        {
+            let weak_self = Rc::downgrade(&this);
+            this.floating.set_on_pause_toggle(move || {
+                let Some(me) = weak_self.upgrade() else { return };
+                me.toggle_pause();
+            });
+        }
+        {
+            let weak_self = Rc::downgrade(&this);
+            this.floating.set_on_mic_toggle(move |v| {
+                if let Some(me) = weak_self.upgrade() {
+                    me.page.switch_mic.set_active(v);
+                }
+            });
+        }
+        {
+            let weak_self = Rc::downgrade(&this);
+            this.floating.set_on_sys_toggle(move |v| {
+                if let Some(me) = weak_self.upgrade() {
+                    me.page.switch_sys.set_active(v);
+                }
             });
         }
 
@@ -383,6 +421,8 @@ impl AppShell {
                 btn.remove_css_class("destructive-action");
                 btn.add_css_class("suggested-action");
                 self.set_sources_sensitive(true);
+                self.floating.hide();
+                self.floating.set_paused(false);
             }
             UiRecordingState::Preparing => {
                 btn.set_child(Some(&gtk::Label::new(Some("Подготовка…"))));
@@ -395,12 +435,42 @@ impl AppShell {
                 btn.remove_css_class("suggested-action");
                 btn.add_css_class("destructive-action");
                 self.set_sources_sensitive(false);
+                self.floating.show(
+                    self.page.switch_mic.is_active(),
+                    self.page.switch_sys.is_active(),
+                );
             }
             UiRecordingState::Finalizing => {
                 btn.set_child(Some(&gtk::Label::new(Some("Сохранение…"))));
                 btn.set_sensitive(false);
                 self.set_sources_sensitive(false);
+                self.floating.hide();
             }
+        }
+    }
+
+    /// Переключить Pause/Resume (phase 19.c.5). В 19.c.4 — stub (только UI).
+    fn toggle_pause(&self) {
+        let Some(pipeline) = self.pipeline.borrow().clone() else {
+            return;
+        };
+        let cur = pipeline.current_state();
+        let (new_state, paused) = if cur == gst::State::Playing {
+            (gst::State::Paused, true)
+        } else {
+            (gst::State::Playing, false)
+        };
+        if let Err(e) = pipeline.set_state(new_state) {
+            tracing::warn!(%e, "pause/resume set_state failed");
+            return;
+        }
+        self.floating.set_paused(paused);
+        if paused {
+            if let Some(src) = self.timer_source.borrow_mut().take() {
+                src.remove();
+            }
+        } else {
+            self.start_timer();
         }
     }
 
@@ -480,6 +550,7 @@ impl AppShell {
         self.stop_timer();
         let started = Instant::now();
         let lbl = self.page.lbl_timer.clone();
+        let floating = self.floating.clone();
         self.page.lbl_timer.set_visible(true);
         self.page.lbl_timer.set_label("00:00:00");
         let src = glib::timeout_add_seconds_local(1, move || {
@@ -488,6 +559,7 @@ impl AppShell {
             let m = (secs % 3600) / 60;
             let s = secs % 60;
             lbl.set_label(&format!("{h:02}:{m:02}:{s:02}"));
+            floating.update_timer(secs);
             glib::Continue(true)
         });
         *self.timer_source.borrow_mut() = Some(src);
