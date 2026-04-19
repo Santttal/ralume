@@ -115,6 +115,11 @@ pub fn split_if_needed(audio: &Path) -> Result<ChunkPlan> {
     })
 }
 
+/// Публичная обёртка — нужна phase 19.b.7 (аккумуляция таймкодов между чанками).
+pub fn probe_duration(audio: &Path) -> Option<f64> {
+    probe_duration_seconds(audio).ok()
+}
+
 fn probe_duration_seconds(audio: &Path) -> Result<f64> {
     let out = Command::new("ffprobe")
         .args([

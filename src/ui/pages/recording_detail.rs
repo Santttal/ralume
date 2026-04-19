@@ -436,13 +436,27 @@ impl RecordingDetailPage {
         self.set_transcript_state(TranscriptState::Done);
     }
 
-    /// Показать .txt-транскрипт одним блоком (без таймкодов).
-    /// JSON-сегменты (с таймкодами и спикерами) приходят в 19.b.7.
+    /// Показать транскрипт: сначала пытаемся .json с сегментами (phase 19.b.7),
+    /// в fallback — plain .txt одним блоком.
     fn populate_transcript_from_txt(&self, video_path: &Path) {
-        // Очистить список.
         while let Some(child) = self.transcript_list.first_child() {
             self.transcript_list.remove(&child);
         }
+
+        // 1) .json с сегментами (whisper-1 verbose_json / diarize).
+        let json_path = video_path.with_extension("json");
+        if let Ok(raw) = std::fs::read_to_string(&json_path) {
+            if let Ok(segments) = serde_json::from_str::<Vec<crate::transcription::client::Segment>>(&raw) {
+                if !segments.is_empty() {
+                    for seg in &segments {
+                        self.transcript_list.append(&make_segment_row(seg));
+                    }
+                    return;
+                }
+            }
+        }
+
+        // 2) Fallback — plain .txt.
         let txt_path = video_path.with_extension("txt");
         let Ok(text) = std::fs::read_to_string(&txt_path) else {
             return;
@@ -494,4 +508,75 @@ fn make_meta_row(key: &str, value: &str) -> adw::ActionRow {
     let row = adw::ActionRow::builder().title(key).subtitle(value).build();
     row.add_css_class("property");
     row
+}
+
+fn make_segment_row(seg: &crate::transcription::client::Segment) -> gtk::ListBoxRow {
+    let row = gtk::ListBoxRow::new();
+    row.add_css_class("transcript-row");
+    let hbox = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(10)
+        .margin_top(6)
+        .margin_bottom(6)
+        .margin_start(12)
+        .margin_end(12)
+        .build();
+
+    let time_lbl = gtk::Label::builder()
+        .label(&format_timestamp(seg.start))
+        .halign(gtk::Align::Start)
+        .valign(gtk::Align::Start)
+        .width_chars(6)
+        .build();
+    time_lbl.add_css_class("transcript-time");
+    hbox.append(&time_lbl);
+
+    if let Some(speaker) = &seg.speaker {
+        let spk_box = gtk::Box::builder()
+            .orientation(gtk::Orientation::Horizontal)
+            .spacing(4)
+            .valign(gtk::Align::Start)
+            .build();
+        let dot = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        dot.set_size_request(8, 8);
+        dot.add_css_class("speaker-dot");
+        if speaker.ends_with('1') || speaker.ends_with("B") {
+            dot.add_css_class("b");
+        }
+        spk_box.append(&dot);
+        let lbl = gtk::Label::new(Some(&pretty_speaker(speaker)));
+        lbl.add_css_class("caption");
+        lbl.add_css_class("dim-label");
+        spk_box.append(&lbl);
+        hbox.append(&spk_box);
+    }
+
+    let text_lbl = gtk::Label::builder()
+        .label(&seg.text)
+        .wrap(true)
+        .wrap_mode(gtk::pango::WrapMode::WordChar)
+        .halign(gtk::Align::Start)
+        .valign(gtk::Align::Start)
+        .hexpand(true)
+        .selectable(true)
+        .build();
+    hbox.append(&text_lbl);
+
+    row.set_child(Some(&hbox));
+    row
+}
+
+fn format_timestamp(secs: f64) -> String {
+    let total = secs as i64;
+    let m = total / 60;
+    let s = total % 60;
+    format!("{m:02}:{s:02}")
+}
+
+fn pretty_speaker(raw: &str) -> String {
+    let digits: String = raw.chars().filter(|c| c.is_ascii_digit()).collect();
+    match digits.parse::<u32>() {
+        Ok(n) => format!("Speaker {}", (b'A' + n.min(25) as u8) as char),
+        Err(_) => raw.to_owned(),
+    }
 }

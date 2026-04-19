@@ -32,6 +32,9 @@ pub struct TranscriptionResult {
     pub text: String,
     pub model: TranscriptionModel,
     pub chunks: u32,
+    /// Сегменты с таймкодами (phase 19.b.7). `None` если модель не вернула
+    /// structured output (gpt-4o-transcribe / mini в text-режиме).
+    pub segments: Option<Vec<client::Segment>>,
 }
 
 pub async fn transcribe_file(
@@ -59,7 +62,10 @@ pub async fn transcribe_file(
     let model = settings.transcription_model;
     let total = parts.paths.len() as u32;
 
-    let mut collected = Vec::with_capacity(parts.paths.len());
+    let mut collected_text: Vec<String> = Vec::with_capacity(parts.paths.len());
+    let mut collected_segments: Vec<client::Segment> = Vec::new();
+    let mut time_offset: f64 = 0.0;
+    let mut any_segments = false;
     for (i, part) in parts.paths.iter().enumerate() {
         let part_no = i as u32 + 1;
         tracing::info!(
@@ -71,16 +77,31 @@ pub async fn transcribe_file(
         if let Some(tx) = progress {
             let _ = tx.send((part_no, total)).await;
         }
-        let text = client::upload_with_retry(&http, part, key, model, lang, 3).await?;
-        collected.push(text);
+        let result = client::upload_with_retry(&http, part, key, model, lang, 3).await?;
+        let part_duration = chunks::probe_duration(part).unwrap_or(0.0);
+        if let Some(segments) = result.segments {
+            any_segments = true;
+            for mut seg in segments {
+                seg.start += time_offset;
+                seg.end += time_offset;
+                collected_segments.push(seg);
+            }
+        }
+        time_offset += part_duration;
+        collected_text.push(result.text);
     }
 
     cleanup_tempfiles(&prepared, &parts);
 
     Ok(TranscriptionResult {
-        text: collected.join("\n\n"),
+        text: collected_text.join("\n\n"),
         model,
         chunks: total,
+        segments: if any_segments {
+            Some(collected_segments)
+        } else {
+            None
+        },
     })
 }
 

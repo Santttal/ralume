@@ -177,6 +177,18 @@ pub async fn run(
                                     chunks = result.chunks,
                                     "transcription saved"
                                 );
+                                // Phase 19.b.7: JSON-sidecar с сегментами.
+                                if let Some(ref segs) = result.segments {
+                                    let json_path = video_path.with_extension("json");
+                                    match serde_json::to_string_pretty(segs) {
+                                        Ok(json) => {
+                                            if let Err(e) = std::fs::write(&json_path, json) {
+                                                tracing::warn!(%e, "failed to write segments .json");
+                                            }
+                                        }
+                                        Err(e) => tracing::warn!(%e, "failed to serialize segments"),
+                                    }
+                                }
                                 let _ = evt_tx
                                     .send(RecorderEvent::TranscriptionFinished {
                                         video_path,

@@ -4,9 +4,26 @@ use std::path::Path;
 use std::time::Duration;
 
 use reqwest::multipart;
+use serde::{Deserialize, Serialize};
 
 use super::TranscriptionError;
 use crate::config::TranscriptionModel;
+
+/// Сегмент с таймкодом. Phase 19.b.7.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Segment {
+    pub start: f64,
+    pub end: f64,
+    pub speaker: Option<String>,
+    pub text: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct UploadResult {
+    pub text: String,
+    /// Опционально — если модель вернула структурированный ответ.
+    pub segments: Option<Vec<Segment>>,
+}
 
 pub async fn upload_with_retry(
     client: &reqwest::Client,
@@ -15,11 +32,11 @@ pub async fn upload_with_retry(
     model: TranscriptionModel,
     language: &str,
     attempts: u32,
-) -> Result<String, TranscriptionError> {
+) -> Result<UploadResult, TranscriptionError> {
     let mut last_err = TranscriptionError::Http("no attempts".into());
     for attempt in 0..attempts.max(1) {
         match upload_single(client, file, api_key, model, language).await {
-            Ok(text) => return Ok(text),
+            Ok(result) => return Ok(result),
             Err(e) => {
                 if !is_retryable(&e) || attempt + 1 == attempts {
                     return Err(e);
@@ -61,7 +78,7 @@ async fn upload_single(
     api_key: &str,
     model: TranscriptionModel,
     language: &str,
-) -> Result<String, TranscriptionError> {
+) -> Result<UploadResult, TranscriptionError> {
     let bytes = tokio::fs::read(file_path).await?;
     let file_name = file_path
         .file_name()
@@ -73,8 +90,12 @@ async fn upload_single(
         .mime_str(mime_for(file_path))
         .map_err(|e| TranscriptionError::Http(e.to_string()))?;
 
+    // Phase 19.b.7: запрашиваем verbose_json для whisper-1, чтобы получить
+    // сегменты с таймкодами. Diarize как был. Остальные — text.
     let response_format = if matches!(model, TranscriptionModel::Gpt4oTranscribeDiarize) {
         "diarized_json"
+    } else if matches!(model, TranscriptionModel::Whisper1) {
+        "verbose_json"
     } else if model.supports_text_response() {
         "text"
     } else {
@@ -114,23 +135,69 @@ async fn upload_single(
         });
     }
 
-    if model.supports_text_response() {
-        return Ok(body);
+    // Для gpt-4o-transcribe / mini в режиме `text` ответ — plain text (без сегментов).
+    if response_format == "text" {
+        return Ok(UploadResult {
+            text: body,
+            segments: None,
+        });
     }
 
     let v: serde_json::Value = serde_json::from_str(&body)
         .map_err(|e| TranscriptionError::Http(format!("bad json: {e}")))?;
 
+    // verbose_json от whisper-1: парсим segments[] с start/end/text.
+    if matches!(model, TranscriptionModel::Whisper1) {
+        if let Some(segments) = v.get("segments").and_then(|x| x.as_array()) {
+            let parsed: Vec<Segment> = segments
+                .iter()
+                .filter_map(|s| {
+                    let start = s.get("start")?.as_f64()?;
+                    let end = s.get("end")?.as_f64().unwrap_or(start);
+                    let text = s.get("text")?.as_str()?.trim().to_owned();
+                    Some(Segment {
+                        start,
+                        end,
+                        speaker: None,
+                        text,
+                    })
+                })
+                .collect();
+            let text = v
+                .get("text")
+                .and_then(|x| x.as_str())
+                .map(|s| s.to_owned())
+                .unwrap_or_else(|| {
+                    parsed
+                        .iter()
+                        .map(|s| s.text.as_str())
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                });
+            return Ok(UploadResult {
+                text,
+                segments: if parsed.is_empty() { None } else { Some(parsed) },
+            });
+        }
+    }
+
     if matches!(model, TranscriptionModel::Gpt4oTranscribeDiarize) {
+        let segments = parse_diarized_segments(&v);
         if let Some(dialogue) = format_diarized(&v) {
-            return Ok(dialogue);
+            return Ok(UploadResult {
+                text: dialogue,
+                segments,
+            });
         }
         tracing::warn!(body = %body.chars().take(300).collect::<String>(), "diarized_json parse fallback");
     }
 
     if let Some(t) = v.get("text").and_then(|x| x.as_str()) {
         if !t.is_empty() {
-            return Ok(t.to_owned());
+            return Ok(UploadResult {
+                text: t.to_owned(),
+                segments: None,
+            });
         }
     }
     if let Some(segments) = v.get("segments").and_then(|x| x.as_array()) {
@@ -139,10 +206,56 @@ async fn upload_single(
             .filter_map(|s| s.get("text").and_then(|x| x.as_str()).map(|s| s.to_owned()))
             .collect();
         if !joined.is_empty() {
-            return Ok(joined.join("\n"));
+            return Ok(UploadResult {
+                text: joined.join("\n"),
+                segments: None,
+            });
         }
     }
-    Ok(String::new())
+    Ok(UploadResult {
+        text: String::new(),
+        segments: None,
+    })
+}
+
+/// Парсит diarized_json в набор сегментов с таймкодами и спикерами.
+/// Для phase 19.b.7 — сохраняется как JSON-sidecar рядом с видео.
+fn parse_diarized_segments(v: &serde_json::Value) -> Option<Vec<Segment>> {
+    let segments = v
+        .get("segments")
+        .and_then(|x| x.as_array())
+        .or_else(|| v.get("results").and_then(|x| x.as_array()))?;
+    let parsed: Vec<Segment> = segments
+        .iter()
+        .filter_map(|s| {
+            let text = s.get("text")?.as_str()?.trim().to_owned();
+            if text.is_empty() {
+                return None;
+            }
+            let start = s.get("start").and_then(|x| x.as_f64()).unwrap_or(0.0);
+            let end = s.get("end").and_then(|x| x.as_f64()).unwrap_or(start);
+            let speaker = s
+                .get("speaker")
+                .and_then(|x| x.as_str())
+                .map(|s| s.to_owned())
+                .or_else(|| {
+                    s.get("speaker_id")
+                        .and_then(|x| x.as_i64())
+                        .map(|i| format!("speaker_{i}"))
+                });
+            Some(Segment {
+                start,
+                end,
+                speaker,
+                text,
+            })
+        })
+        .collect();
+    if parsed.is_empty() {
+        None
+    } else {
+        Some(parsed)
+    }
 }
 
 /// Форматирует ответ diarized_json как диалог `Speaker X: …`.

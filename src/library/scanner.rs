@@ -76,7 +76,8 @@ pub fn scan(dir: &Path) -> Vec<Recording> {
             .file_stem()
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_else(|| "Без названия".to_owned());
-        let has_transcript = path.with_extension("txt").is_file();
+        let has_transcript =
+            path.with_extension("txt").is_file() || path.with_extension("json").is_file();
 
         let (duration_seconds, resolution) = ffprobe_meta(&path).unwrap_or((None, None));
 
