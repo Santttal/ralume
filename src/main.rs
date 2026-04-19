@@ -12,6 +12,7 @@ use gtk4 as gtk;
 use tokio::runtime::Runtime;
 
 mod config;
+mod library;
 mod portal;
 mod recorder;
 mod transcription;
