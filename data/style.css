@@ -73,6 +73,20 @@
 }
 
 /* Floating toolbar — borderless window during recording */
+/* Окно (.floating-toolbar-window) делаем полностью прозрачным,
+   тёмный фон + скругление рисует только внутренний hbox (.floating-toolbar). */
+window.floating-toolbar-window,
+window.floating-toolbar-window > * {
+    background: transparent;
+    box-shadow: none;
+    border: none;
+}
+window.floating-toolbar-window decoration {
+    background: transparent;
+    box-shadow: none;
+    border: none;
+}
+
 .floating-toolbar {
     background: alpha(#1e1e1e, 0.95);
     color: #ffffff;

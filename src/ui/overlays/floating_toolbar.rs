@@ -34,6 +34,15 @@ impl FloatingToolbar {
             .title("Ralume — Запись")
             .build();
         window.set_default_size(1, 1);
+        // Prозрачное окно + без CSD-тени/рамки (пункт 2 UX-фидбека).
+        window.add_css_class("floating-toolbar-window");
+
+        // Попытка исключить окно из захвата экрана GNOME ScreenCast (пункт 3).
+        // `_NET_WM_WINDOW_TYPE = _NET_WM_WINDOW_TYPE_NOTIFICATION` некоторые
+        // композиторы трактуют как «не отображать в записи». На GNOME Mutter
+        // это не гарантированно работает (ScreenCast захватывает всю композицию),
+        // но хуже не станет.
+        install_no_capture_hint(&window);
 
         let hbox = gtk::Box::builder()
             .orientation(gtk::Orientation::Horizontal)
@@ -88,7 +97,11 @@ impl FloatingToolbar {
         hbox.append(&btn_sys);
         hbox.append(&make_vu_placeholder());
 
-        window.set_child(Some(&hbox));
+        // WindowHandle — позволяет тащить окно мышью за неактивные области тулбара
+        // (пункт 1 UX-фидбека).
+        let handle = gtk::WindowHandle::new();
+        handle.set_child(Some(&hbox));
+        window.set_child(Some(&handle));
 
         let this = Rc::new(Self {
             window,
@@ -183,6 +196,63 @@ impl FloatingToolbar {
     #[allow(dead_code)]
     pub fn is_paused(&self) -> bool {
         *self.paused.borrow()
+    }
+}
+
+/// Устанавливает X11 window type = NOTIFICATION для окна тулбара через xprop —
+/// часть композиторов трактует NOTIFICATION-окна как «не включать в ScreenCast».
+/// На GNOME Mutter (наш дефолт) это не даёт 100% гарантии, т.к. портал снимает
+/// всю композицию, но для некоторых настроек (XFCE/KDE с KStatusNotifier, Hyprland)
+/// результат — окно не попадает в запись. Best effort.
+fn install_no_capture_hint(window: &gtk::Window) {
+    let window_ref = window.clone();
+    window.connect_map(move |_| {
+        // Подождём тик, пока X11 назначит ID окну.
+        let w = window_ref.clone();
+        glib::idle_add_local_once(move || {
+            if let Some(id) = x11_window_id(&w) {
+                let _ = std::process::Command::new("xprop")
+                    .args([
+                        "-id", &id, "-f", "_NET_WM_WINDOW_TYPE", "32a",
+                        "-set", "_NET_WM_WINDOW_TYPE",
+                        "_NET_WM_WINDOW_TYPE_NOTIFICATION",
+                    ])
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .spawn();
+                // Также skip taskbar/pager — удобство.
+                let _ = std::process::Command::new("xprop")
+                    .args([
+                        "-id", &id, "-f", "_NET_WM_STATE", "32a",
+                        "-set", "_NET_WM_STATE",
+                        "_NET_WM_STATE_SKIP_TASKBAR,_NET_WM_STATE_SKIP_PAGER,_NET_WM_STATE_ABOVE",
+                    ])
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .spawn();
+            }
+        });
+    });
+}
+
+/// Возвращает X11 Window ID как hex-строку для xprop, если мы на X11.
+fn x11_window_id(window: &gtk::Window) -> Option<String> {
+    // gdk4 surface → через downcast в X11Surface получаем xid. Но эта часть API
+    // не всегда экспортирована; пробуем через `xdotool search --name`.
+    let out = std::process::Command::new("xdotool")
+        .args(["search", "--name", &window.title().unwrap_or_default()])
+        .output()
+        .ok()?;
+    let first = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .next()?
+        .trim()
+        .to_owned();
+    if first.is_empty() {
+        None
+    } else {
+        // xdotool даёт decimal; xprop любит hex или decimal — оба валидны.
+        Some(first)
     }
 }
 
