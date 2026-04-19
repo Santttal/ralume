@@ -123,6 +123,8 @@ pub struct Settings {
     pub region_mode: RegionMode,
     pub capture_source: CaptureSource,
     pub encoder_hint: EncoderHint,
+    /// Задержка перед стартом записи (0/3/5/10 с). Phase 19.a.7.
+    pub countdown_seconds: u32,
     pub hotkey_start_stop: String,
     pub transcription_enabled: bool,
     pub transcription_model: TranscriptionModel,
@@ -148,6 +150,7 @@ impl Default for Settings {
             region_mode: RegionMode::Monitor,
             capture_source: CaptureSource::Screen,
             encoder_hint: EncoderHint::Auto,
+            countdown_seconds: 0,
             hotkey_start_stop: "<Ctrl><Alt>R".to_owned(),
             transcription_enabled: false,
             transcription_model: TranscriptionModel::Gpt4oMiniTranscribe,

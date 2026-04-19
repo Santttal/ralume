@@ -170,6 +170,9 @@ fn build_recording_group(
         .description("Параметры применяются к следующей записи.")
         .build();
 
+    // Countdown (phase 19.a.7) — сегментированный 0/3/5/10 секунд.
+    group.add(&build_countdown_row(settings, save_pending));
+
     let container_row = make_combo_row(
         "Контейнер",
         &["MKV (рекомендуется)", "MP4", "WebM"],
@@ -377,6 +380,57 @@ fn build_stt_api_group(
     key_row.set_activatable_widget(Some(&entry));
     group.add(&key_row);
     group
+}
+
+fn build_countdown_row(
+    settings: &SharedSettings,
+    save_pending: &Rc<RefCell<Option<glib::SourceId>>>,
+) -> adw::ActionRow {
+    let row = adw::ActionRow::builder()
+        .title("Отсчёт перед стартом")
+        .subtitle("Задержка в секундах — успеть переключиться на нужное окно.")
+        .build();
+
+    let current = settings.read().unwrap().countdown_seconds;
+
+    let segmented = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .valign(gtk::Align::Center)
+        .build();
+    segmented.add_css_class("linked");
+
+    let mut buttons: Vec<(gtk::ToggleButton, u32)> = Vec::new();
+    let choices: &[(u32, &str)] = &[(0, "Off"), (3, "3 с"), (5, "5 с"), (10, "10 с")];
+    let mut group_anchor: Option<gtk::ToggleButton> = None;
+    for (value, label) in choices {
+        let btn = gtk::ToggleButton::builder()
+            .label(*label)
+            .active(*value == current)
+            .valign(gtk::Align::Center)
+            .build();
+        if let Some(anchor) = group_anchor.as_ref() {
+            btn.set_group(Some(anchor));
+        } else {
+            group_anchor = Some(btn.clone());
+        }
+        segmented.append(&btn);
+        buttons.push((btn, *value));
+    }
+    for (btn, value) in &buttons {
+        let settings = settings.clone();
+        let save_pending = save_pending.clone();
+        let v = *value;
+        btn.connect_toggled(move |b| {
+            if !b.is_active() {
+                return;
+            }
+            settings.write().unwrap().countdown_seconds = v;
+            schedule_save(&settings, &save_pending);
+        });
+    }
+
+    row.add_suffix(&segmented);
+    row
 }
 
 fn build_stt_model_group(
