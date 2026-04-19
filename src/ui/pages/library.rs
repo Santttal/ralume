@@ -244,15 +244,15 @@ impl LibraryPage {
             }
             CardUpdate::Thumb { path, thumb } => {
                 if let Some(h) = cards.get(&path) {
-                    // Заменить содержимое picture_slot.
                     while let Some(c) = h.picture_slot.first_child() {
                         h.picture_slot.remove(&c);
                     }
                     let pic = gtk::Picture::for_filename(&thumb);
                     pic.set_can_shrink(true);
                     pic.set_keep_aspect_ratio(true);
-                    pic.set_hexpand(true);
-                    pic.set_vexpand(true);
+                    // Размер слота уже заложен; фиксируем natural size Picture
+                    // тем же значением (иначе FlowBox пересчитает column-width).
+                    pic.set_size_request(h.picture_slot.width_request(), -1);
                     h.picture_slot.append(&pic);
                 }
             }
@@ -326,8 +326,9 @@ fn make_card(rec: &Recording, on_open: OpenCallback) -> (gtk::FlowBoxChild, Card
         let pic = gtk::Picture::for_filename(&existing);
         pic.set_can_shrink(true);
         pic.set_keep_aspect_ratio(true);
-        pic.set_hexpand(true);
-        pic.set_vexpand(true);
+        // Ограничиваем natural size картинки размером слота — иначе FlowBox
+        // использует native 720×405 и не помещает >1 карточки в ряд.
+        pic.set_size_request(THUMB_W, THUMB_H);
         picture_slot.append(&pic);
     } else {
         // Короткий placeholder — не даём длинному имени раздуть карточку.
@@ -335,8 +336,7 @@ fn make_card(rec: &Recording, on_open: OpenCallback) -> (gtk::FlowBoxChild, Card
         placeholder.add_css_class("dim-label");
         placeholder.set_halign(gtk::Align::Center);
         placeholder.set_valign(gtk::Align::Center);
-        placeholder.set_hexpand(true);
-        placeholder.set_vexpand(true);
+        placeholder.set_size_request(THUMB_W, THUMB_H);
         picture_slot.append(&placeholder);
     }
     overlay.set_child(Some(&picture_slot));
