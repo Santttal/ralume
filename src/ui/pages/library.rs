@@ -101,14 +101,16 @@ impl LibraryPage {
         top.append(&refresh_btn);
         container.append(&top);
 
-        // Сетка карточек.
+        // Сетка карточек. Homogeneous выключен — FlowBox не растягивает карточки
+        // на всю ширину viewport; фиксированный размер задаём в make_card.
         let flow = gtk::FlowBox::builder()
             .column_spacing(18)
             .row_spacing(18)
             .max_children_per_line(4)
             .min_children_per_line(1)
-            .homogeneous(true)
+            .homogeneous(false)
             .selection_mode(gtk::SelectionMode::None)
+            .halign(gtk::Align::Start)
             .build();
         let scroll = gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::Never)
@@ -293,30 +295,32 @@ impl LibraryPage {
 }
 
 fn make_card(rec: &Recording, on_open: OpenCallback) -> (gtk::FlowBoxChild, CardHandles) {
+    // Фиксированный размер картиночной области — 260×146 (≈16:9).
+    // Задаём на уровне Overlay/picture_slot, чтобы AspectFrame не коллапсировал,
+    // когда Picture ещё не загружен.
+    const THUMB_W: i32 = 260;
+    const THUMB_H: i32 = 146;
+
     let card = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
         .spacing(0)
-        .width_request(240)
         .build();
     card.add_css_class("lib-card");
+    card.set_size_request(THUMB_W, -1);
 
-    // ── Thumbnail area (16:9).
-    let thumb_frame = gtk::AspectFrame::builder()
-        .ratio(16.0 / 9.0)
-        .obey_child(false)
-        .build();
-    thumb_frame.add_css_class("lib-card-thumb");
-
+    // Overlay с фиксированным размером — содержит Picture/placeholder + badges.
     let overlay = gtk::Overlay::new();
+    overlay.add_css_class("lib-card-thumb");
+    overlay.set_size_request(THUMB_W, THUMB_H);
 
-    // picture_slot — Box, куда positions либо Picture (если thumb готов), либо placeholder.
+    // picture_slot — Box, куда кладём либо Picture (когда thumb готов), либо placeholder.
     let picture_slot = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
         .hexpand(true)
         .vexpand(true)
         .build();
-    // Если thumb уже в кеше (синхронный быстрый путь), используем его сразу —
-    // иначе ждём фонового CardUpdate::Thumb.
+    picture_slot.set_size_request(THUMB_W, THUMB_H);
+
     let existing = thumb_path(&rec.path);
     if existing.is_file() {
         let pic = gtk::Picture::for_filename(&existing);
@@ -326,16 +330,13 @@ fn make_card(rec: &Recording, on_open: OpenCallback) -> (gtk::FlowBoxChild, Card
         pic.set_vexpand(true);
         picture_slot.append(&pic);
     } else {
-        let placeholder = gtk::Label::new(Some(&format!(
-            "// {}",
-            rec.path
-                .file_name()
-                .map(|s| s.to_string_lossy().into_owned())
-                .unwrap_or_default()
-        )));
+        // Короткий placeholder — не даём длинному имени раздуть карточку.
+        let placeholder = gtk::Label::new(Some("…"));
         placeholder.add_css_class("dim-label");
         placeholder.set_halign(gtk::Align::Center);
         placeholder.set_valign(gtk::Align::Center);
+        placeholder.set_hexpand(true);
+        placeholder.set_vexpand(true);
         picture_slot.append(&placeholder);
     }
     overlay.set_child(Some(&picture_slot));
@@ -362,8 +363,7 @@ fn make_card(rec: &Recording, on_open: OpenCallback) -> (gtk::FlowBoxChild, Card
     duration_badge.set_visible(rec.duration_seconds.is_some());
     overlay.add_overlay(&duration_badge);
 
-    thumb_frame.set_child(Some(&overlay));
-    card.append(&thumb_frame);
+    card.append(&overlay);
 
     // ── Текстовая часть (внутри карточки, padding).
     let info = gtk::Box::builder()
