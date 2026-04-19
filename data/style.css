@@ -98,6 +98,16 @@
     box-shadow: inset 0 -1px 0 @borders;
 }
 
+/* VU placeholders (phase 19.c.6/7) — реальные peak'и подключим позже */
+.vu-bar {
+    background: @success_color;
+    border-radius: 1px;
+}
+.vu-warn {
+    background: @warning_color;
+    border-radius: 1px;
+}
+
 /* Transcript — Recording detail right column */
 .transcript-row {
     padding: 10px 16px;

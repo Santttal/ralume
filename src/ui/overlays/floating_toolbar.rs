@@ -78,6 +78,7 @@ impl FloatingToolbar {
             .build();
         btn_mic.add_css_class("flat");
         hbox.append(&btn_mic);
+        hbox.append(&make_vu_placeholder());
 
         let btn_sys = gtk::ToggleButton::builder()
             .icon_name("audio-volume-high-symbolic")
@@ -85,6 +86,7 @@ impl FloatingToolbar {
             .build();
         btn_sys.add_css_class("flat");
         hbox.append(&btn_sys);
+        hbox.append(&make_vu_placeholder());
 
         window.set_child(Some(&hbox));
 
@@ -189,6 +191,25 @@ fn sep() -> gtk::Separator {
     s.set_margin_top(3);
     s.set_margin_bottom(3);
     s
+}
+
+/// Пять статичных баров — визуальный placeholder VU (phase 19.c.6 MVP).
+/// Реальное подключение GStreamer `level` — будущая работа.
+fn make_vu_placeholder() -> gtk::Box {
+    let vu = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(2)
+        .valign(gtk::Align::Center)
+        .build();
+    vu.set_width_request(40);
+    for i in 0..5 {
+        let bar = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        let h = 4 + i * 3;
+        bar.set_size_request(3, h);
+        bar.add_css_class(if i >= 3 { "vu-warn" } else { "vu-bar" });
+        vu.append(&bar);
+    }
+    vu
 }
 
 // glib для сигналов timer — необходим, но больше ничего не делает.
