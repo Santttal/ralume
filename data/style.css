@@ -88,11 +88,26 @@ window.floating-toolbar-window decoration {
 }
 
 .floating-toolbar {
-    background: alpha(#1e1e1e, 0.95);
+    background: #1e1e1e;
     color: #ffffff;
     border-radius: 14px;
     padding: 6px 10px;
-    box-shadow: 0 12px 40px alpha(#000000, 0.35);
+}
+
+/* Countdown overlay — белые цифры на полупрозрачном тёмном фоне экрана */
+window.countdown-window,
+window.countdown-window > * {
+    background: alpha(#000000, 0.25);
+}
+window.countdown-window decoration {
+    background: transparent;
+    box-shadow: none;
+    border: none;
+}
+.countdown-number {
+    color: #ffffff;
+    text-shadow: 0 2px 12px alpha(#000000, 0.7);
+    font-weight: 700;
 }
 
 .floating-toolbar .timer-label {

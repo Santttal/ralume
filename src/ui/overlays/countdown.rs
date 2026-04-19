@@ -28,6 +28,7 @@ pub fn start(
         .modal(true)
         .build();
     window.fullscreen();
+    window.add_css_class("countdown-window");
 
     let label = gtk::Label::builder()
         .label(&secs.to_string())
