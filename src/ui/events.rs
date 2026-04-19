@@ -3,6 +3,7 @@ use std::path::PathBuf;
 
 use ashpd::WindowIdentifier;
 
+use crate::config::TranscriptionModel;
 use crate::ui::window::Sources;
 
 #[allow(dead_code)]
@@ -13,6 +14,9 @@ pub enum UiCommand {
         parent: WindowIdentifier,
     },
     StopRequested,
+    TranscribeRequested {
+        video_path: PathBuf,
+    },
     Quit,
 }
 
@@ -31,4 +35,22 @@ pub enum RecorderEvent {
     },
     Error(String),
     Cancelled,
+    TranscriptionStarted {
+        video_path: PathBuf,
+    },
+    TranscriptionProgress {
+        video_path: PathBuf,
+        part: u32,
+        total: u32,
+    },
+    TranscriptionFinished {
+        video_path: PathBuf,
+        text_path: PathBuf,
+        model: TranscriptionModel,
+        chunks: u32,
+    },
+    TranscriptionFailed {
+        video_path: PathBuf,
+        message: String,
+    },
 }

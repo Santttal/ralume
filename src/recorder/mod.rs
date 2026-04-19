@@ -121,6 +121,91 @@ pub async fn run(
                     tracing::warn!("StopRequested without active session");
                 }
             }
+            UiCommand::TranscribeRequested { video_path } => {
+                let snapshot = { settings.read().unwrap().clone() };
+                let _ = evt_tx
+                    .send(RecorderEvent::TranscriptionStarted {
+                        video_path: video_path.clone(),
+                    })
+                    .await;
+                // Мостим progress-канал транскрипции → UI-события.
+                let (prog_tx, prog_rx) = async_channel::unbounded::<(u32, u32)>();
+                let evt_tx_progress = evt_tx.clone();
+                let video_for_progress = video_path.clone();
+                let progress_forwarder = tokio::spawn(async move {
+                    while let Ok((part, total)) = prog_rx.recv().await {
+                        let _ = evt_tx_progress
+                            .send(RecorderEvent::TranscriptionProgress {
+                                video_path: video_for_progress.clone(),
+                                part,
+                                total,
+                            })
+                            .await;
+                    }
+                });
+                let result =
+                    crate::transcription::transcribe_file(&video_path, &snapshot, Some(&prog_tx))
+                        .await;
+                drop(prog_tx);
+                let _ = progress_forwarder.await;
+                match result {
+                    Ok(result) => {
+                        if result.text.trim().is_empty() {
+                            tracing::warn!(
+                                video = %video_path.display(),
+                                "transcription came back empty — likely silent audio; .txt not written"
+                            );
+                            let _ = evt_tx
+                                .send(RecorderEvent::TranscriptionFailed {
+                                    video_path,
+                                    message:
+                                        "Речь не распознана — возможно, запись беззвучная \
+                                         (монитор динамика, если ничего не играло). \
+                                         Попробуйте включить микрофон."
+                                            .to_string(),
+                                })
+                                .await;
+                            continue;
+                        }
+                        let text_path = crate::transcription::text_output_path(&video_path);
+                        match std::fs::write(&text_path, &result.text) {
+                            Ok(()) => {
+                                tracing::info!(
+                                    video = %video_path.display(),
+                                    text = %text_path.display(),
+                                    model = ?result.model,
+                                    chunks = result.chunks,
+                                    "transcription saved"
+                                );
+                                let _ = evt_tx
+                                    .send(RecorderEvent::TranscriptionFinished {
+                                        video_path,
+                                        text_path,
+                                        model: result.model,
+                                        chunks: result.chunks,
+                                    })
+                                    .await;
+                            }
+                            Err(e) => {
+                                tracing::warn!(%e, "failed to write transcription .txt");
+                                let _ = evt_tx
+                                    .send(RecorderEvent::TranscriptionFailed {
+                                        video_path,
+                                        message: format!("write .txt: {e}"),
+                                    })
+                                    .await;
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        let message = crate::transcription::friendly_message(&e);
+                        tracing::warn!(err = %e, "transcription failed");
+                        let _ = evt_tx
+                            .send(RecorderEvent::TranscriptionFailed { video_path, message })
+                            .await;
+                    }
+                }
+            }
             UiCommand::Quit => break,
         }
     }

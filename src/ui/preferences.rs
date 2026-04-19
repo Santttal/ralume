@@ -9,7 +9,7 @@ use gtk4 as gtk;
 
 use crate::config::{
     AudioMode, Container, CursorMode, EncoderHint, RegionMode, Settings, SharedSettings,
-    VideoCodec,
+    TranscriptionModel, VideoCodec,
 };
 use crate::recorder::encoders::detect_available_encoders;
 
@@ -40,6 +40,7 @@ impl PreferencesWindow {
 
         window.add(&build_recording_page(&settings, &save_pending));
         window.add(&build_audio_page(&settings, &save_pending));
+        window.add(&build_stt_page(&settings, &save_pending));
         window.add(&build_hotkeys_page(&settings, &save_pending));
 
         Self {
@@ -343,6 +344,161 @@ fn build_audio_page(
     page
 }
 
+fn build_stt_page(
+    settings: &SharedSettings,
+    save_pending: &Rc<RefCell<Option<glib::SourceId>>>,
+) -> adw::PreferencesPage {
+    let page = adw::PreferencesPage::builder()
+        .title("Распознавание речи")
+        .icon_name("audio-input-microphone-symbolic")
+        .build();
+
+    // ── API
+    let api_group = adw::PreferencesGroup::builder()
+        .title("OpenAI API")
+        .description("Ключ хранится в ~/.config/ralume/settings.toml (chmod 600).")
+        .build();
+
+    let key_row = adw::ActionRow::builder().title("API-ключ").build();
+    let entry = gtk::Entry::builder()
+        .valign(gtk::Align::Center)
+        .input_purpose(gtk::InputPurpose::Password)
+        .visibility(false)
+        .text(settings.read().unwrap().openai_api_key.as_str())
+        .placeholder_text("sk-…")
+        .width_chars(24)
+        .build();
+    {
+        let settings = settings.clone();
+        let save_pending = save_pending.clone();
+        entry.connect_changed(move |e| {
+            settings.write().unwrap().openai_api_key = e.text().to_string();
+            schedule_save(&settings, &save_pending);
+        });
+    }
+    let reveal_btn = gtk::Button::builder()
+        .valign(gtk::Align::Center)
+        .icon_name("view-reveal-symbolic")
+        .tooltip_text("Показать/скрыть ключ")
+        .build();
+    reveal_btn.add_css_class("flat");
+    {
+        let entry = entry.clone();
+        let shown = std::cell::Cell::new(false);
+        reveal_btn.connect_clicked(move |btn| {
+            let v = !shown.get();
+            shown.set(v);
+            entry.set_visibility(v);
+            btn.set_icon_name(if v {
+                "view-conceal-symbolic"
+            } else {
+                "view-reveal-symbolic"
+            });
+        });
+    }
+    key_row.add_suffix(&entry);
+    key_row.add_suffix(&reveal_btn);
+    key_row.set_activatable_widget(Some(&entry));
+    api_group.add(&key_row);
+    page.add(&api_group);
+
+    // ── Модель
+    let model_group = adw::PreferencesGroup::builder().title("Модель").build();
+    let model_row = make_combo_row(
+        "Модель",
+        &[
+            "GPT-4o Mini Transcribe ($0.003/мин, рекомендуется)",
+            "GPT-4o Transcribe ($0.006/мин, качество)",
+            "Whisper-1 ($0.006/мин, поддержка SRT)",
+            "GPT-4o Transcribe + Diarize ($0.006/мин, дикторы)",
+        ],
+        model_to_index(settings.read().unwrap().transcription_model),
+    );
+    let current = settings.read().unwrap().transcription_model;
+    let desc_row = adw::ActionRow::builder()
+        .title(current.label())
+        .subtitle(model_description(current))
+        .build();
+    {
+        let settings = settings.clone();
+        let save_pending = save_pending.clone();
+        let desc_row = desc_row.clone();
+        model_row.connect_selected_notify(move |row| {
+            let m = model_from_index(row.selected());
+            settings.write().unwrap().transcription_model = m;
+            desc_row.set_title(m.label());
+            desc_row.set_subtitle(model_description(m));
+            schedule_save(&settings, &save_pending);
+        });
+    }
+    model_group.add(&model_row);
+    model_group.add(&desc_row);
+    page.add(&model_group);
+
+    // ── Язык
+    let lang_group = adw::PreferencesGroup::builder()
+        .title("Параметры")
+        .description("Оставьте язык пустым для авто-определения. Примеры: ru, en.")
+        .build();
+    let lang_row = adw::ActionRow::builder().title("Язык").build();
+    let lang_entry = gtk::Entry::builder()
+        .valign(gtk::Align::Center)
+        .text(settings.read().unwrap().transcription_language.as_str())
+        .placeholder_text("auto")
+        .width_chars(6)
+        .build();
+    {
+        let settings = settings.clone();
+        let save_pending = save_pending.clone();
+        lang_entry.connect_changed(move |e| {
+            let txt = e.text().to_string();
+            let valid = txt.is_empty() || (txt.len() == 2 && txt.chars().all(|c| c.is_ascii_alphabetic()));
+            if valid {
+                e.remove_css_class("error");
+                settings.write().unwrap().transcription_language = txt.to_lowercase();
+                schedule_save(&settings, &save_pending);
+            } else {
+                e.add_css_class("error");
+            }
+        });
+    }
+    lang_row.add_suffix(&lang_entry);
+    lang_row.set_activatable_widget(Some(&lang_entry));
+    lang_group.add(&lang_row);
+
+    let help_row = adw::ActionRow::builder()
+        .title("Лимит файла — 25 МБ")
+        .subtitle("Длинные записи автоматически делятся на части и склеиваются в один .txt")
+        .build();
+    let docs_btn = gtk::Button::builder()
+        .label("Документация")
+        .valign(gtk::Align::Center)
+        .build();
+    docs_btn.add_css_class("flat");
+    docs_btn.connect_clicked(|_| {
+        if let Err(e) = gio::AppInfo::launch_default_for_uri(
+            "https://platform.openai.com/docs/guides/speech-to-text",
+            gio::AppLaunchContext::NONE,
+        ) {
+            tracing::warn!(%e, "failed to open stt docs");
+        }
+    });
+    help_row.add_suffix(&docs_btn);
+    lang_group.add(&help_row);
+    page.add(&lang_group);
+
+    page
+}
+
+fn model_description(m: TranscriptionModel) -> &'static str {
+    match m {
+        TranscriptionModel::Whisper1 => "Классика: таймкоды и SRT/VTT, качество ниже чем 4o на шумных записях.",
+        TranscriptionModel::Gpt4oTranscribe => "Высшее качество на русском и английском; response_format только text/json.",
+        TranscriptionModel::Gpt4oMiniTranscribe => "Вдвое дешевле, качество близко к gpt-4o-transcribe; хороший дефолт.",
+        TranscriptionModel::Gpt4oTranscribeDiarize => "Делит дорожку по дикторам — полезно для созвонов.",
+    }
+}
+
 fn build_hotkeys_page(
     settings: &SharedSettings,
     save_pending: &Rc<RefCell<Option<glib::SourceId>>>,
@@ -506,6 +662,23 @@ fn encoder_hint_from_index(i: u32) -> EncoderHint {
         1 => EncoderHint::Hardware,
         2 => EncoderHint::Software,
         _ => EncoderHint::Auto,
+    }
+}
+
+fn model_to_index(m: TranscriptionModel) -> u32 {
+    match m {
+        TranscriptionModel::Gpt4oMiniTranscribe => 0,
+        TranscriptionModel::Gpt4oTranscribe => 1,
+        TranscriptionModel::Whisper1 => 2,
+        TranscriptionModel::Gpt4oTranscribeDiarize => 3,
+    }
+}
+fn model_from_index(i: u32) -> TranscriptionModel {
+    match i {
+        1 => TranscriptionModel::Gpt4oTranscribe,
+        2 => TranscriptionModel::Whisper1,
+        3 => TranscriptionModel::Gpt4oTranscribeDiarize,
+        _ => TranscriptionModel::Gpt4oMiniTranscribe,
     }
 }
 

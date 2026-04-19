@@ -18,6 +18,8 @@ GStreamer + GTK4/libadwaita.
 - 🗂 **Crash-safe MKV** — file plays even if the app is killed mid-recording
 - 🔴 **Recording indicator** — pulsing red dot in the header bar and
   elapsed timer
+- 📝 **Speech-to-text** — optional OpenAI transcription (Whisper-1 / GPT-4o
+  Transcribe). Saves a `.txt` next to the video; toggle persists between runs
 
 ## Screenshots
 

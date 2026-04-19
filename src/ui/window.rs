@@ -48,6 +48,8 @@ pub struct AppWindow {
     switch_screen: gtk::Switch,
     switch_sys: gtk::Switch,
     switch_mic: gtk::Switch,
+    switch_stt: gtk::Switch,
+    stt_spinner: gtk::Spinner,
     lbl_rec_dot: gtk::Label,
     toast_overlay: adw::ToastOverlay,
     state: Rc<RefCell<UiRecordingState>>,
@@ -128,9 +130,21 @@ impl AppWindow {
         row_mic.add_suffix(&switch_mic);
         row_mic.set_activatable_widget(Some(&switch_mic));
 
+        let row_stt = adw::ActionRow::builder()
+            .title("Распознавание речи")
+            .subtitle("Сохраняет расшифровку в .txt рядом с видео (OpenAI)")
+            .build();
+        let switch_stt = gtk::Switch::builder()
+            .valign(gtk::Align::Center)
+            .active(settings.read().unwrap().transcription_enabled)
+            .build();
+        row_stt.add_suffix(&switch_stt);
+        row_stt.set_activatable_widget(Some(&switch_stt));
+
         group.add(&row_screen);
         group.add(&row_sys);
         group.add(&row_mic);
+        group.add(&row_stt);
         root.append(&group);
 
         let btn_start_stop = gtk::Button::builder()
@@ -149,7 +163,18 @@ impl AppWindow {
 
         let lbl_status = gtk::Label::new(Some("Готов"));
         lbl_status.add_css_class("dim-label");
-        root.append(&lbl_status);
+
+        let stt_spinner = gtk::Spinner::new();
+        stt_spinner.set_visible(false);
+
+        let status_row = gtk::Box::builder()
+            .orientation(gtk::Orientation::Horizontal)
+            .spacing(8)
+            .halign(gtk::Align::Center)
+            .build();
+        status_row.append(&stt_spinner);
+        status_row.append(&lbl_status);
+        root.append(&status_row);
 
         let toast_overlay = adw::ToastOverlay::new();
         toast_overlay.set_child(Some(&root));
@@ -169,6 +194,8 @@ impl AppWindow {
             switch_screen,
             switch_sys,
             switch_mic,
+            switch_stt: switch_stt.clone(),
+            stt_spinner,
             lbl_rec_dot,
             toast_overlay,
             state: Rc::new(RefCell::new(UiRecordingState::Idle)),
@@ -180,6 +207,24 @@ impl AppWindow {
             evt_tx,
             settings,
         });
+
+        {
+            let settings = this.settings.clone();
+            let weak_self = Rc::downgrade(&this);
+            switch_stt.connect_state_set(move |_w, new_state| {
+                settings.write().unwrap().transcription_enabled = new_state;
+                let snapshot = settings.read().unwrap().clone();
+                if let Err(e) = crate::config::save(&snapshot) {
+                    tracing::warn!(%e, "failed to persist transcription toggle");
+                }
+                if new_state && snapshot.openai_api_key.trim().is_empty() {
+                    if let Some(me) = weak_self.upgrade() {
+                        me.show_toast("Укажите API-ключ OpenAI в Настройках");
+                    }
+                }
+                glib::signal::Inhibit(false)
+            });
+        }
 
         let weak_self = Rc::downgrade(&this);
         btn_start_stop.connect_clicked(move |_| {
@@ -261,10 +306,24 @@ impl AppWindow {
         self.switch_screen.set_sensitive(sensitive);
         self.switch_sys.set_sensitive(sensitive);
         self.switch_mic.set_sensitive(sensitive);
+        self.switch_stt.set_sensitive(sensitive);
+    }
+
+    pub fn transcription_enabled(&self) -> bool {
+        self.switch_stt.is_active()
     }
 
     pub fn set_status(&self, text: &str) {
         self.lbl_status.set_label(text);
+    }
+
+    pub fn set_stt_busy(&self, busy: bool) {
+        self.stt_spinner.set_visible(busy);
+        if busy {
+            self.stt_spinner.start();
+        } else {
+            self.stt_spinner.stop();
+        }
     }
 
     pub fn show_saved_toast(&self, path: &std::path::Path) {
@@ -276,7 +335,24 @@ impl AppWindow {
             .title(&format!("Сохранено: {name}"))
             .button_label("Показать")
             .action_name("app.show-file")
-            .timeout(8)
+            .timeout(3)
+            .build();
+        if let Some(d) = path.parent() {
+            toast.set_action_target_value(Some(&d.to_string_lossy().to_string().to_variant()));
+        }
+        self.toast_overlay.add_toast(toast);
+    }
+
+    pub fn show_saved_text_toast(&self, path: &std::path::Path) {
+        let name = path
+            .file_name()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let toast = adw::Toast::builder()
+            .title(&format!("Расшифровка сохранена: {name}"))
+            .button_label("Показать")
+            .action_name("app.show-file")
+            .timeout(3)
             .build();
         if let Some(d) = path.parent() {
             toast.set_action_target_value(Some(&d.to_string_lossy().to_string().to_variant()));
@@ -291,7 +367,7 @@ impl AppWindow {
         } else {
             text.to_owned()
         };
-        let toast = adw::Toast::builder().title(&trimmed).timeout(5).build();
+        let toast = adw::Toast::builder().title(&trimmed).timeout(3).build();
         self.toast_overlay.add_toast(toast);
     }
 
@@ -365,6 +441,27 @@ impl AppWindow {
                         window.show_saved_toast(&final_path);
                         // Закрыть portal-сессию (recorder tokio-задача).
                         let _ = window.cmd_tx.send(UiCommand::StopRequested).await;
+
+                        // Транскрипция: тумблер включён + ключ задан → запускаем.
+                        if window.transcription_enabled() {
+                            let api_empty = window
+                                .settings
+                                .read()
+                                .unwrap()
+                                .openai_api_key
+                                .trim()
+                                .is_empty();
+                            if api_empty {
+                                window.show_toast("Укажите API-ключ OpenAI в Настройках");
+                            } else {
+                                let _ = window
+                                    .cmd_tx
+                                    .send(UiCommand::TranscribeRequested {
+                                        video_path: final_path,
+                                    })
+                                    .await;
+                            }
+                        }
                     }
                     RecorderEvent::Error(msg) => {
                         window.cancel_force_null_watchdog();
@@ -384,6 +481,36 @@ impl AppWindow {
                         window.set_recording_state(UiRecordingState::Idle);
                         window.stop_timer();
                         window.set_status("Готов");
+                    }
+                    RecorderEvent::TranscriptionStarted { .. } => {
+                        window.set_stt_busy(true);
+                        window.set_status("Распознаю речь…");
+                    }
+                    RecorderEvent::TranscriptionProgress { part, total, .. } => {
+                        if total > 1 {
+                            window
+                                .set_status(&format!("Распознаю речь… (часть {part} из {total})"));
+                        }
+                    }
+                    RecorderEvent::TranscriptionFinished {
+                        text_path,
+                        chunks,
+                        ..
+                    } => {
+                        window.set_stt_busy(false);
+                        let name = text_path
+                            .file_name()
+                            .map(|s| s.to_string_lossy().into_owned())
+                            .unwrap_or_default();
+                        tracing::info!(chunks, path = %text_path.display(), "transcription done");
+                        window.set_status(&format!("Расшифровка: {name}"));
+                        window.show_saved_text_toast(&text_path);
+                    }
+                    RecorderEvent::TranscriptionFailed { message, .. } => {
+                        window.set_stt_busy(false);
+                        tracing::warn!(%message, "transcription failed");
+                        window.set_status("Ошибка расшифровки");
+                        window.show_toast(&format!("Ошибка расшифровки: {message}"));
                     }
                 }
             }

@@ -1,6 +1,6 @@
 [package]
 name = "ralume"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2021"
 
 [dependencies]
@@ -21,3 +21,5 @@ directories = "5"
 async-channel = "2"
 enumflags2 = "0.7"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
+# Фаза 12 — OpenAI speech-to-text. rustls-tls чтобы не зависеть от системной libssl.
+reqwest = { version = "0.11", default-features = false, features = ["rustls-tls", "multipart", "json"] }

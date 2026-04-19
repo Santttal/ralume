@@ -14,6 +14,7 @@ use tokio::runtime::Runtime;
 mod config;
 mod portal;
 mod recorder;
+mod transcription;
 mod ui;
 
 use config::SharedSettings;
