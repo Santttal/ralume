@@ -49,6 +49,7 @@ pub struct AppShell {
     library_page: Rc<crate::ui::pages::library::LibraryPage>,
     post_page: Rc<crate::ui::pages::post_record::PostRecordPage>,
     detail_page: Rc<crate::ui::pages::recording_detail::RecordingDetailPage>,
+    ai_page: Rc<crate::ui::pages::ai::AiPage>,
     lbl_rec_dot: gtk::Label,
     toast_overlay: adw::ToastOverlay,
     state: Rc<RefCell<UiRecordingState>>,
@@ -124,7 +125,9 @@ impl AppShell {
         let post_page = crate::ui::pages::post_record::PostRecordPage::new(settings.clone());
         stack.add_named(&post_page.root, Some("post-record"));
 
-        stack.add_named(&build_placeholder_page("AI", "Откроется в фазе 19.c."), Some("ai"));
+        // AI (phase 19.c.2) — очередь задач транскрипции.
+        let ai_page = crate::ui::pages::ai::AiPage::new();
+        stack.add_named(&ai_page.root, Some("ai"));
         stack.add_named(
             &crate::ui::pages::settings::build(settings.clone()),
             Some("settings"),
@@ -179,7 +182,9 @@ impl AppShell {
         // Recording detail → Transcribe now → UiCommand::TranscribeRequested.
         {
             let cmd_tx = cmd_tx.clone();
+            let ai_ref = ai_page.clone();
             detail_page.set_on_transcribe(move |video_path| {
+                ai_ref.enqueue(video_path.clone());
                 let cmd_tx = cmd_tx.clone();
                 glib::MainContext::default().spawn_local(async move {
                     let _ = cmd_tx
@@ -217,6 +222,7 @@ impl AppShell {
             library_page,
             post_page: post_page.clone(),
             detail_page,
+            ai_page,
             lbl_rec_dot,
             toast_overlay,
             state: Rc::new(RefCell::new(UiRecordingState::Idle)),
@@ -345,6 +351,7 @@ impl AppShell {
                         self.select_view("library");
                     }
                     // Отправляем команду транскрипции.
+                    self.ai_page.enqueue(path.clone());
                     let cmd_tx = self.cmd_tx.clone();
                     let p = path.clone();
                     glib::MainContext::default().spawn_local(async move {
@@ -562,20 +569,22 @@ impl AppShell {
                         window.stop_timer();
                         window.set_status("Готов");
                     }
-                    RecorderEvent::TranscriptionStarted { .. } => {
+                    RecorderEvent::TranscriptionStarted { video_path } => {
                         window.set_stt_busy(true);
                         window.set_status("Распознаю речь…");
                         window
                             .detail_page
                             .set_transcript_state(crate::ui::pages::recording_detail::TranscriptState::Processing);
+                        window.ai_page.mark_processing(&video_path, 0.0);
                     }
-                    RecorderEvent::TranscriptionProgress { part, total, .. } => {
+                    RecorderEvent::TranscriptionProgress { video_path, part, total } => {
                         if total > 1 {
                             window
                                 .set_status(&format!("Распознаю речь… (часть {part} из {total})"));
                         }
                         let fraction = part as f64 / (total.max(1) as f64);
                         window.detail_page.set_transcript_progress(fraction);
+                        window.ai_page.mark_processing(&video_path, fraction);
                     }
                     RecorderEvent::TranscriptionFinished {
                         video_path,
@@ -591,12 +600,11 @@ impl AppShell {
                         tracing::info!(chunks, path = %text_path.display(), "transcription done");
                         window.set_status(&format!("Расшифровка: {name}"));
                         window.show_saved_text_toast(&text_path);
-                        // Перечитать transcript в detail-page если открыт этот файл.
                         window.detail_page.reload_if_current(&video_path);
-                        // Перестроить Library (now has_transcript = true).
                         window.library_page.refresh();
+                        window.ai_page.mark_done(&video_path);
                     }
-                    RecorderEvent::TranscriptionFailed { message, .. } => {
+                    RecorderEvent::TranscriptionFailed { video_path, message } => {
                         window.set_stt_busy(false);
                         tracing::warn!(%message, "transcription failed");
                         window.set_status("Ошибка расшифровки");
@@ -604,6 +612,7 @@ impl AppShell {
                         window
                             .detail_page
                             .set_transcript_state(crate::ui::pages::recording_detail::TranscriptState::None);
+                        window.ai_page.mark_failed(&video_path, message);
                     }
                 }
             }
@@ -882,6 +891,7 @@ fn make_sidebar_row(label: &str, icon: &str) -> gtk::ListBoxRow {
 }
 
 /// Плейсхолдер для экранов, которые появятся в следующих подфазах.
+#[allow(dead_code)]
 fn build_placeholder_page(title: &str, subtitle: &str) -> gtk::Widget {
     let page = adw::StatusPage::builder()
         .title(title)

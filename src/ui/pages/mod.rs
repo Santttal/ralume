@@ -1,6 +1,7 @@
 //! Экраны приложения. Каждый файл возвращает root-виджет и набор ссылок
 //! на внутренние виджеты, которые держатся владельцем (AppShell) для биндингов.
 
+pub mod ai;
 pub mod library;
 pub mod post_record;
 pub mod record;
