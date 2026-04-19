@@ -121,8 +121,14 @@ pub async fn run(
                     tracing::warn!("StopRequested without active session");
                 }
             }
-            UiCommand::TranscribeRequested { video_path } => {
-                let snapshot = { settings.read().unwrap().clone() };
+            UiCommand::TranscribeRequested {
+                video_path,
+                model_override,
+            } => {
+                let mut snapshot = { settings.read().unwrap().clone() };
+                if let Some(m) = model_override {
+                    snapshot.transcription_model = m;
+                }
                 let _ = evt_tx
                     .send(RecorderEvent::TranscriptionStarted {
                         video_path: video_path.clone(),

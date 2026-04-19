@@ -10,6 +10,7 @@ use gtk::gio;
 use libadwaita as adw;
 use gtk4 as gtk;
 
+use crate::config::{SharedSettings, TranscriptionModel};
 use crate::library::{ensure_thumb, Recording};
 
 /// Состояние транскрипт-панели.
@@ -21,7 +22,7 @@ pub enum TranscriptState {
     Done,
 }
 
-type PathCallback = Rc<RefCell<Option<Box<dyn Fn(PathBuf)>>>>;
+type PathModelCallback = Rc<RefCell<Option<Box<dyn Fn(PathBuf, TranscriptionModel)>>>>;
 type VoidCallback = Rc<RefCell<Option<Box<dyn Fn()>>>>;
 
 #[allow(dead_code)]
@@ -45,6 +46,7 @@ pub struct RecordingDetailPage {
     // Transcript column
     transcript_stack: gtk::Stack, // children: "empty", "processing", "done"
     btn_transcribe: gtk::Button,
+    model_dropdown: gtk::DropDown,
     progress_bar: gtk::ProgressBar,
     transcript_list: gtk::ListBox,
     model_badge: gtk::Label,
@@ -52,12 +54,19 @@ pub struct RecordingDetailPage {
     // Current recording + callbacks
     current: Rc<RefCell<Option<Recording>>>,
     on_back: VoidCallback,
-    on_transcribe: PathCallback,
+    on_transcribe: PathModelCallback,
 }
+
+const MODEL_OPTIONS: &[TranscriptionModel] = &[
+    TranscriptionModel::Gpt4oMiniTranscribe,
+    TranscriptionModel::Gpt4oTranscribe,
+    TranscriptionModel::Whisper1,
+    TranscriptionModel::Gpt4oTranscribeDiarize,
+];
 
 #[allow(dead_code)]
 impl RecordingDetailPage {
-    pub fn new() -> Rc<Self> {
+    pub fn new(settings: SharedSettings) -> Rc<Self> {
         let container = gtk::Box::builder()
             .orientation(gtk::Orientation::Vertical)
             .spacing(0)
@@ -275,6 +284,26 @@ impl RecordingDetailPage {
         empty_sub.set_max_width_chars(40);
         empty_sub.add_css_class("dim-label");
         empty.append(&empty_sub);
+
+        // DropDown для выбора модели — дефолт из settings.transcription_model.
+        let model_labels: Vec<&str> = MODEL_OPTIONS.iter().map(|m| m.label()).collect();
+        let model_list = gtk::StringList::new(&model_labels);
+        let initial_idx = MODEL_OPTIONS
+            .iter()
+            .position(|m| *m == settings.read().unwrap().transcription_model)
+            .unwrap_or(0) as u32;
+        let model_dropdown = gtk::DropDown::builder()
+            .model(&model_list)
+            .selected(initial_idx)
+            .halign(gtk::Align::Center)
+            .width_request(280)
+            .build();
+        let model_caption = gtk::Label::new(Some("Модель распознавания"));
+        model_caption.add_css_class("caption");
+        model_caption.add_css_class("dim-label");
+        empty.append(&model_caption);
+        empty.append(&model_dropdown);
+
         let btn_transcribe = gtk::Button::builder()
             .label("Распознать речь")
             .halign(gtk::Align::Center)
@@ -384,6 +413,7 @@ impl RecordingDetailPage {
             meta_row_path,
             transcript_stack,
             btn_transcribe,
+            model_dropdown,
             progress_bar,
             transcript_list,
             model_badge,
@@ -415,16 +445,19 @@ impl RecordingDetailPage {
                 }
             });
         }
-        // Wire Transcribe — вызов добавляется в 19.b.6.
+        // Wire Transcribe — передаём выбранную в dropdown модель.
         {
             let cb = this.on_transcribe.clone();
             let current = this.current.clone();
+            let dropdown = this.model_dropdown.clone();
             this.btn_transcribe.connect_clicked(move |_| {
                 let Some(rec) = current.borrow().clone() else {
                     return;
                 };
+                let idx = dropdown.selected() as usize;
+                let model = MODEL_OPTIONS.get(idx).copied().unwrap_or(MODEL_OPTIONS[0]);
                 if let Some(f) = cb.borrow().as_ref() {
-                    f(rec.path);
+                    f(rec.path, model);
                 }
             });
         }
@@ -561,8 +594,17 @@ impl RecordingDetailPage {
         *self.on_back.borrow_mut() = Some(Box::new(f));
     }
 
-    pub fn set_on_transcribe(&self, f: impl Fn(PathBuf) + 'static) {
+    pub fn set_on_transcribe(&self, f: impl Fn(PathBuf, TranscriptionModel) + 'static) {
         *self.on_transcribe.borrow_mut() = Some(Box::new(f));
+    }
+
+    /// Обновить default-selected модель в dropdown (например, если пользователь
+    /// открыл другую запись и в Settings изменилась модель).
+    pub fn sync_default_model(&self, settings: &SharedSettings) {
+        let current = settings.read().unwrap().transcription_model;
+        if let Some(idx) = MODEL_OPTIONS.iter().position(|m| *m == current) {
+            self.model_dropdown.set_selected(idx as u32);
+        }
     }
 
     /// Показать конкретную запись. Обновляет topbar, превью, meta, transcript-state.

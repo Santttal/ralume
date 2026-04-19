@@ -119,7 +119,8 @@ impl AppShell {
         stack.add_named(&library_page.root, Some("library"));
 
         // Recording detail (phase 19.b.5) — показывается после клика по карточке.
-        let detail_page = crate::ui::pages::recording_detail::RecordingDetailPage::new();
+        let detail_page =
+            crate::ui::pages::recording_detail::RecordingDetailPage::new(settings.clone());
         stack.add_named(&detail_page.root, Some("recording-detail"));
 
         // Post-record (phase 19.b.1) — экран после остановки записи.
@@ -180,16 +181,20 @@ impl AppShell {
             });
         }
 
-        // Recording detail → Transcribe now → UiCommand::TranscribeRequested.
+        // Recording detail → Transcribe now → UiCommand::TranscribeRequested
+        // с model_override, выбранной в dropdown (phase 19.b.7 UX-fix).
         {
             let cmd_tx = cmd_tx.clone();
             let ai_ref = ai_page.clone();
-            detail_page.set_on_transcribe(move |video_path| {
+            detail_page.set_on_transcribe(move |video_path, model| {
                 ai_ref.enqueue(video_path.clone());
                 let cmd_tx = cmd_tx.clone();
                 glib::MainContext::default().spawn_local(async move {
                     let _ = cmd_tx
-                        .send(UiCommand::TranscribeRequested { video_path })
+                        .send(UiCommand::TranscribeRequested {
+                            video_path,
+                            model_override: Some(model),
+                        })
                         .await;
                 });
             });
@@ -394,7 +399,10 @@ impl AppShell {
                     let p = path.clone();
                     glib::MainContext::default().spawn_local(async move {
                         let _ = cmd_tx
-                            .send(UiCommand::TranscribeRequested { video_path: p })
+                            .send(UiCommand::TranscribeRequested {
+                                video_path: p,
+                                model_override: None,
+                            })
                             .await;
                     });
                 } else {

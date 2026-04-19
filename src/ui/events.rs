@@ -16,6 +16,8 @@ pub enum UiCommand {
     StopRequested,
     TranscribeRequested {
         video_path: PathBuf,
+        /// Если задано — перекрывает `settings.transcription_model` для этой задачи.
+        model_override: Option<TranscriptionModel>,
     },
     Quit,
 }
