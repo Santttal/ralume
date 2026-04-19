@@ -273,6 +273,23 @@ impl RecordingDetailPage {
             .orientation(gtk::Orientation::Vertical)
             .spacing(0)
             .build();
+
+        // Поиск по транскрипту (phase 19.b.8).
+        let search_bar = gtk::Box::builder()
+            .orientation(gtk::Orientation::Horizontal)
+            .spacing(6)
+            .margin_top(8)
+            .margin_bottom(4)
+            .margin_start(14)
+            .margin_end(14)
+            .build();
+        let search_entry = gtk::SearchEntry::builder()
+            .placeholder_text("Найти в транскрипте…")
+            .hexpand(true)
+            .build();
+        search_bar.append(&search_entry);
+        done_box.append(&search_bar);
+
         let transcript_list = gtk::ListBox::builder()
             .selection_mode(gtk::SelectionMode::None)
             .build();
@@ -281,13 +298,31 @@ impl RecordingDetailPage {
             .hscrollbar_policy(gtk::PolicyType::Never)
             .vexpand(true)
             .child(&transcript_list)
-            .margin_top(10)
+            .margin_top(4)
             .margin_bottom(10)
             .margin_start(12)
             .margin_end(12)
             .build();
         done_box.append(&done_scroll);
         transcript_stack.add_named(&done_box, Some("done"));
+
+        // Связь filter-func со SearchEntry.
+        {
+            let list = transcript_list.clone();
+            search_entry.connect_search_changed(move |entry| {
+                let q = entry.text().to_string().to_lowercase();
+                let mut idx = 0;
+                while let Some(row) = list.row_at_index(idx) {
+                    let visible = if q.is_empty() {
+                        true
+                    } else {
+                        row_text(&row).to_lowercase().contains(&q)
+                    };
+                    row.set_visible(visible);
+                    idx += 1;
+                }
+            });
+        }
 
         transcript_stack.set_visible_child_name("empty");
         transcript_col.append(&transcript_stack);
@@ -564,6 +599,27 @@ fn make_segment_row(seg: &crate::transcription::client::Segment) -> gtk::ListBox
 
     row.set_child(Some(&hbox));
     row
+}
+
+/// Собрать весь видимый текст из листовых `gtk::Label` внутри row.
+/// Нужно для фильтрации поиска (phase 19.b.8).
+fn row_text(row: &gtk::ListBoxRow) -> String {
+    let mut out = String::new();
+    collect_label_text(&row.clone().upcast::<gtk::Widget>(), &mut out);
+    out
+}
+
+fn collect_label_text(widget: &gtk::Widget, out: &mut String) {
+    if let Ok(lbl) = widget.clone().downcast::<gtk::Label>() {
+        out.push(' ');
+        out.push_str(&lbl.text());
+        return;
+    }
+    let mut child = widget.first_child();
+    while let Some(c) = child {
+        collect_label_text(&c, out);
+        child = c.next_sibling();
+    }
 }
 
 fn format_timestamp(secs: f64) -> String {
