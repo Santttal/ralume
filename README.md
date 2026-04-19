@@ -8,18 +8,37 @@ GStreamer + GTK4/libadwaita.
 
 ## Features
 
-- 🎥 **Screen capture** via xdg-desktop-portal (GNOME, KDE, wlroots, Hyprland)
+- 🎥 **Screen capture** via xdg-desktop-portal (GNOME, KDE, wlroots, Hyprland).
+  Choose **Entire screen** or **Window** as capture source.
 - 🔊 **System audio** from the default sink monitor (no mic required)
 - 🎙 **Microphone** independent toggle
-- 🎚 **Mixed or separate audio tracks** — choose in Preferences
+- 🎚 **Mixed or separate audio tracks** — choose in Settings
 - ⚡ **Hardware encoding** — NVIDIA NVENC, Intel VAAPI, falls back to x264enc
   software encoder automatically
-- ⚙️ **Preferences** — FPS, bitrate, audio mode, output folder, encoder hint
 - 🗂 **Crash-safe MKV** — file plays even if the app is killed mid-recording
 - 🔴 **Recording indicator** — pulsing red dot in the header bar and
   elapsed timer
 - 📝 **Speech-to-text** — optional OpenAI transcription (Whisper-1 / GPT-4o
-  Transcribe). Saves a `.txt` next to the video; toggle persists between runs
+  Transcribe). Saves a `.txt` next to the video; toggle persists between runs.
+  Auto / Manual segmented control: Auto starts transcription right after save,
+  Manual leaves it for the Library → Recording detail screen.
+
+## Navigation
+
+The main window follows an Adwaita-style sidebar layout
+(phase 19.a onwards — see `docs/design/` for the full design handoff):
+
+- **Запись / Record** — source selection, audio toggles, Auto/Manual
+  transcription, big Start button.
+- **Библиотека / Library** — grid of recordings *(coming in phase 19.b)*.
+- **AI** — processing queue *(coming in phase 19.c)*.
+- **Настройки / Settings** — all preferences that used to live in the
+  separate `PreferencesWindow`. Grouped into General, Recording, Audio,
+  STT model/language, Shortcuts.
+
+The design source (HTML/JSX prototype from Claude Design) lives in
+`docs/design/` for reference. Phase-by-phase implementation plan is
+in `docs/tasks/phase-19/`.
 
 ## Screenshots
 
@@ -79,13 +98,20 @@ cargo build --release
 ```
 src/
   main.rs                — bootstrap, actions, channels, tokio runtime
-  ui/{window,preferences,events,style}.rs
+  ui/
+    shell.rs             — AppShell (window + sidebar + Stack navigation)
+    pages/{record,settings}.rs  — per-section page builders
+    events.rs style.rs
   portal/{screencast,state,shortcuts}.rs
   recorder/{pipeline,encoders,audio,output}.rs
+  transcription/{client,chunks,audio,mod}.rs
   config/settings.rs
 data/{style.css,*.desktop,icons/}
 scripts/{run.sh,install.sh,package-release.sh}
-docs/                    — architecture, implementation log, task breakdown
+docs/
+  architecture.md, implementation-log.md, research.md
+  design/                — Claude Design handoff bundle (HTML/JSX prototype)
+  tasks/phase-{N}/       — phase decomposition and per-task sheets
 ```
 
 See `docs/architecture.md` for a detailed walkthrough.
