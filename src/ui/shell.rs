@@ -176,6 +176,19 @@ impl AppShell {
             });
         }
 
+        // Recording detail → Transcribe now → UiCommand::TranscribeRequested.
+        {
+            let cmd_tx = cmd_tx.clone();
+            detail_page.set_on_transcribe(move |video_path| {
+                let cmd_tx = cmd_tx.clone();
+                glib::MainContext::default().spawn_local(async move {
+                    let _ = cmd_tx
+                        .send(UiCommand::TranscribeRequested { video_path })
+                        .await;
+                });
+            });
+        }
+
         let body = gtk::Box::builder()
             .orientation(gtk::Orientation::Horizontal)
             .build();
@@ -552,14 +565,20 @@ impl AppShell {
                     RecorderEvent::TranscriptionStarted { .. } => {
                         window.set_stt_busy(true);
                         window.set_status("Распознаю речь…");
+                        window
+                            .detail_page
+                            .set_transcript_state(crate::ui::pages::recording_detail::TranscriptState::Processing);
                     }
                     RecorderEvent::TranscriptionProgress { part, total, .. } => {
                         if total > 1 {
                             window
                                 .set_status(&format!("Распознаю речь… (часть {part} из {total})"));
                         }
+                        let fraction = part as f64 / (total.max(1) as f64);
+                        window.detail_page.set_transcript_progress(fraction);
                     }
                     RecorderEvent::TranscriptionFinished {
+                        video_path,
                         text_path,
                         chunks,
                         ..
@@ -572,12 +591,19 @@ impl AppShell {
                         tracing::info!(chunks, path = %text_path.display(), "transcription done");
                         window.set_status(&format!("Расшифровка: {name}"));
                         window.show_saved_text_toast(&text_path);
+                        // Перечитать transcript в detail-page если открыт этот файл.
+                        window.detail_page.reload_if_current(&video_path);
+                        // Перестроить Library (now has_transcript = true).
+                        window.library_page.refresh();
                     }
                     RecorderEvent::TranscriptionFailed { message, .. } => {
                         window.set_stt_busy(false);
                         tracing::warn!(%message, "transcription failed");
                         window.set_status("Ошибка расшифровки");
                         window.show_toast(&format!("Ошибка расшифровки: {message}"));
+                        window
+                            .detail_page
+                            .set_transcript_state(crate::ui::pages::recording_detail::TranscriptState::None);
                     }
                 }
             }

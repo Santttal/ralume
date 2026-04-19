@@ -421,6 +421,21 @@ impl RecordingDetailPage {
         self.progress_bar.set_fraction(fraction.clamp(0.0, 1.0));
     }
 
+    /// Если detail сейчас открыт на `video_path` — перечитать .txt и перейти в Done.
+    pub fn reload_if_current(&self, video_path: &Path) {
+        let same = self
+            .current
+            .borrow()
+            .as_ref()
+            .map(|r| r.path == video_path)
+            .unwrap_or(false);
+        if !same {
+            return;
+        }
+        self.populate_transcript_from_txt(video_path);
+        self.set_transcript_state(TranscriptState::Done);
+    }
+
     /// Показать .txt-транскрипт одним блоком (без таймкодов).
     /// JSON-сегменты (с таймкодами и спикерами) приходят в 19.b.7.
     fn populate_transcript_from_txt(&self, video_path: &Path) {
