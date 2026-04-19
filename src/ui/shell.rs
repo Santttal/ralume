@@ -74,6 +74,11 @@ impl AppShell {
 
         let header = adw::HeaderBar::new();
 
+        // Заголовок меняется динамически в зависимости от активной view (phase 19.a.9).
+        let title_label = gtk::Label::new(Some("Новая запись"));
+        title_label.add_css_class("heading");
+        header.set_title_widget(Some(&title_label));
+
         let lbl_rec_dot = gtk::Label::new(Some("●"));
         lbl_rec_dot.add_css_class("recording-dot");
         lbl_rec_dot.set_visible(false);
@@ -111,6 +116,15 @@ impl AppShell {
         );
 
         let (sidebar, sidebar_list) = build_sidebar(&stack);
+
+        // Заголовок header-бара следует за активной view (phase 19.a.9).
+        {
+            let lbl = title_label.clone();
+            stack.connect_visible_child_name_notify(move |s| {
+                let name = s.visible_child_name().map(|g| g.to_string()).unwrap_or_default();
+                lbl.set_label(title_for(&name));
+            });
+        }
 
         let body = gtk::Box::builder()
             .orientation(gtk::Orientation::Horizontal)
@@ -759,4 +773,15 @@ fn build_placeholder_page(title: &str, subtitle: &str) -> gtk::Widget {
         .hexpand(true)
         .build();
     page.upcast()
+}
+
+/// Заголовок в header-баре для активной view (phase 19.a.9).
+fn title_for(view: &str) -> &'static str {
+    match view {
+        "record" => "Новая запись",
+        "library" => "Библиотека",
+        "ai" => "AI",
+        "settings" => "Настройки",
+        _ => "Ralume",
+    }
 }
