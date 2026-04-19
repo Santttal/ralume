@@ -108,7 +108,11 @@ impl AppShell {
             .vexpand(true)
             .build();
         stack.add_named(&page.root, Some("record"));
-        stack.add_named(&build_placeholder_page("Library", "Откроется в фазе 19.b."), Some("library"));
+
+        // Library (phase 19.b.4) — file-scanner grid.
+        let library_page = crate::ui::pages::library::LibraryPage::new(settings.clone());
+        stack.add_named(&library_page.root, Some("library"));
+
         stack.add_named(&build_placeholder_page("AI", "Откроется в фазе 19.c."), Some("ai"));
         stack.add_named(
             &crate::ui::pages::settings::build(settings.clone()),
@@ -118,13 +122,30 @@ impl AppShell {
         let (sidebar, sidebar_list) = build_sidebar(&stack);
 
         // Заголовок header-бара следует за активной view (phase 19.a.9).
+        // Также: при переходе на Library пересканируем директорию.
         {
             let lbl = title_label.clone();
+            let library_ref = library_page.clone();
             stack.connect_visible_child_name_notify(move |s| {
                 let name = s.visible_child_name().map(|g| g.to_string()).unwrap_or_default();
                 lbl.set_label(title_for(&name));
+                if name == "library" {
+                    library_ref.refresh();
+                }
             });
         }
+
+        // Переход на Recording detail (phase 19.b.5) — пока просто открываем
+        // файл во внешнем плеере; в 19.b.5 заменим на navigation в detail-page.
+        library_page.set_on_open(|path| {
+            let uri = format!("file://{}", path.display());
+            if let Err(e) = gtk::gio::AppInfo::launch_default_for_uri(
+                &uri,
+                gtk::gio::AppLaunchContext::NONE,
+            ) {
+                tracing::warn!(%e, "failed to open recording externally");
+            }
+        });
 
         let body = gtk::Box::builder()
             .orientation(gtk::Orientation::Horizontal)
