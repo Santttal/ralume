@@ -110,13 +110,16 @@ impl LibraryPage {
             .min_children_per_line(1)
             .homogeneous(false)
             .selection_mode(gtk::SelectionMode::None)
-            .halign(gtk::Align::Start)
+            .halign(gtk::Align::Fill)
+            .hexpand(true)
             .build();
         let scroll = gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::Never)
             .vexpand(true)
+            .hexpand(true)
             .child(&flow)
             .build();
+        container.set_hexpand(true);
         container.append(&scroll);
 
         let root: gtk::Widget = container.upcast();
@@ -298,12 +301,14 @@ fn make_card(rec: &Recording, on_open: OpenCallback) -> (gtk::FlowBoxChild, Card
     // Фиксированный размер картиночной области — 220×124 (≈16:9).
     // Ширину подобрали так, чтобы при окне 960×640 и sidebar 200px в ряд
     // помещалось 3 карточки: 220*3 + spacing 18*2 + padding 32*2 ≈ 760 < 760px.
-    const THUMB_W: i32 = 220;
-    const THUMB_H: i32 = 124;
+    const THUMB_W: i32 = 200;
+    const THUMB_H: i32 = 112;
 
     let card = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
         .spacing(0)
+        .hexpand(false)
+        .halign(gtk::Align::Start)
         .build();
     card.add_css_class("lib-card");
     card.set_size_request(THUMB_W, -1);

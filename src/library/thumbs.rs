@@ -8,7 +8,7 @@ use directories::ProjectDirs;
 
 /// Версия кеша — bump при изменении параметров ffmpeg (scale, формат и т.п.),
 /// чтобы старые thumbnails автоматически регенерировались.
-const THUMB_CACHE_VERSION: u8 = 2;
+const THUMB_CACHE_VERSION: u8 = 4;
 
 /// Путь к thumbnail'у (независимо от его существования).
 pub fn thumb_path(video: &Path) -> PathBuf {
@@ -41,7 +41,7 @@ pub fn ensure_thumb(video: &Path) -> Option<PathBuf> {
         .args(["-y", "-loglevel", "error", "-ss", "5"])
         .arg("-i")
         .arg(video)
-        .args(["-frames:v", "1", "-vf", "scale=720:-1"])
+        .args(["-frames:v", "1", "-vf", "scale=200:-1"])
         .arg(&thumb)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -53,7 +53,7 @@ pub fn ensure_thumb(video: &Path) -> Option<PathBuf> {
             .args(["-y", "-loglevel", "error"])
             .arg("-i")
             .arg(video)
-            .args(["-frames:v", "1", "-vf", "scale=720:-1"])
+            .args(["-frames:v", "1", "-vf", "scale=200:-1"])
             .arg(&thumb)
             .stdout(Stdio::null())
             .stderr(Stdio::null())
