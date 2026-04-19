@@ -51,8 +51,9 @@ impl Recording {
     }
 }
 
-/// Сканирует директорию. Возвращает записи, отсортированные от новых к старым.
-/// Не рекурсивно.
+/// Быстрый сканер: только `read_dir + fs::metadata`, без ffprobe.
+/// Возвращает записи без `duration_seconds`/`resolution` (они `None`).
+/// Используется UI для мгновенного рендера; тяжёлое обогащение — через `enrich()`.
 pub fn scan(dir: &Path) -> Vec<Recording> {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
@@ -79,20 +80,24 @@ pub fn scan(dir: &Path) -> Vec<Recording> {
         let has_transcript =
             path.with_extension("txt").is_file() || path.with_extension("json").is_file();
 
-        let (duration_seconds, resolution) = ffprobe_meta(&path).unwrap_or((None, None));
-
         out.push(Recording {
             path,
             title,
             created,
             size_bytes: meta.len(),
-            duration_seconds,
-            resolution,
+            duration_seconds: None,
+            resolution: None,
             has_transcript,
         });
     }
     out.sort_by(|a, b| b.created.cmp(&a.created));
     out
+}
+
+/// Тяжёлое обогащение: ffprobe для duration + resolution. Вызывать на фоне.
+/// Возвращает те же поля в паре; можно положить их в существующую `Recording`.
+pub fn enrich(path: &Path) -> (Option<f64>, Option<(u32, u32)>) {
+    ffprobe_meta(path).unwrap_or((None, None))
 }
 
 fn is_video(path: &Path) -> bool {

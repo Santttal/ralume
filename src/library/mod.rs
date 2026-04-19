@@ -6,5 +6,5 @@
 pub mod scanner;
 pub mod thumbs;
 
-pub use scanner::{scan, Recording};
+pub use scanner::{enrich, scan, Recording};
 pub use thumbs::{ensure_thumb, thumb_path};
